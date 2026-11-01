@@ -1,35 +1,18 @@
 <?xml version="1.0"?>
 <typesystem package="variant_binding">
 
-    <!-- 说明（实证结论）：
-         shiboken6 的 Python 签名解析器不认识命名空间类型 "vt.Variant"，
-         任何参数类型不匹配都会走到错误处理并 fatal。因此这里不把 Variant
-         声明成 primitive-type，所有跨语言值一律用 PyObject 直通，
-         由 variant_python.cpp 在 C++ 侧完成递归转换。 -->
+    <!-- ==================================================================
+         设计（见 docs/真实签名迁移计划.md）：
+         - 函数签名直接写 vt::Variant / vt::VariantMap / 标准容器；
+         - Python 侧看到的就是原生 dict/list/标量，不出现 PyObject 门面；
+         - 容器不逐个注册：shiboken 内置 vector/unordered_map 转换器负责
+           容器层，元素层复用下面 vt::Variant 的转换规则，天然递归；
+         - 扩展类型（DemoNode/DemoColor/std::shared_ptr<T>）的注册在
+           vpy::registerDemoTypes()，未注册时转换必须响亮失败。
+         ================================================================== -->
 
-    <!-- Python 侧文档门面：get/set 的 value 走 PyObject 直通 -->
-    <object-type name="PyDocument"/>
-
-    <!-- 跨语言读写：签名用 PyObject 直通，C++ 侧手工转换。
-         不用成员方法是因为 shiboken 的自动绑定不支持 PyObject* 形参/返回。 -->
-    <add-function signature="pyDocGet(const PyDocument*, const std::string&amp;)">
-        <inject-code class="target" position="beginning">
-            return pyDocGet(cppArg0, cppArg1);
-        </inject-code>
-    </add-function>
-
-    <add-function signature="pyDocSet(PyDocument*, const std::string&amp;, PyObject)">
-        <inject-code class="target" position="beginning">
-            PyObject *pyResult{};
-            bool cppResult = pyDocSet(cppArg0, cppArg1, %PYARG_3);
-            pyResult = Shiboken::Conversions::copyToPython(
-                Shiboken::Conversions::PrimitiveTypeConverter&lt;bool&gt;(), &amp;cppResult);
-            return pyResult;
-        </inject-code>
-    </add-function>
-
-    <!-- ====== 实验：Variant 作为 primitive-type ======
-         目标：让函数签名直接写 vt::Variant，Python 侧仍是原生 dict/list。
+    <!-- ====== vt::Variant 作为 primitive-type ======
+         target-lang-api-name="PyObject" 表示 Python 侧是任意原生对象。
          递归在 vpy::toPython/fromPython 内部完成；这里只暴露转换入口。
          转换类别使用 shiboken 内置类别，SbkObject 分支限定为已注册类型。 -->
     <primitive-type name="vt::Variant" target-lang-api-name="PyObject">
@@ -56,12 +39,20 @@
                                 file="glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <add-conversion type="SbkObject" check="vpy::isRegisteredObject(%in)"
                                 file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                <!-- 兜底：任何对象都进入转换函数，由 fromPython 给出明确的
+                     TypeError。没有这一条时，未匹配的类型会让 shiboken 走
+                     returnWrongArguments，而它解析不了 "vt.Variant" 签名，
+                     会直接 fatal（seterror_argument did not receive a result）。 -->
+                <add-conversion type="PyObject" check="true"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
             </target-to-native>
         </conversion-rule>
     </primitive-type>
 
-    <!-- VariantMap 作为 primitive-type：内部委托给 shiboken 内置的
-         std::unordered_map<std::string, vt::Variant> 转换器，不手写逐元素递归。 -->
+    <!-- ====== vt::VariantMap 作为 primitive-type ======
+         不手写逐元素递归：内部委托给 shiboken 内置的
+         std::unordered_map<std::string, vt::Variant> 转换器，
+         元素再回调 vt::Variant 的转换规则。 -->
     <primitive-type name="vt::VariantMap" target-lang-api-name="PyObject">
         <include file-name="vt/variant_map.h" location="local"/>
         <conversion-rule>
@@ -69,50 +60,14 @@
             <target-to-native>
                 <add-conversion type="PyDict" check="PyDict_Check(%in)"
                                 file="glue/variant_convert.cpp" snippet="variantmap-from-python"/>
+                <!-- 兜底：同 vt::Variant，避免重载解析失败时 shiboken fatal。 -->
+                <add-conversion type="PyObject" check="true"
+                                file="glue/variant_convert.cpp" snippet="variantmap-from-python-catchall"/>
             </target-to-native>
         </conversion-rule>
     </primitive-type>
 
-    <!-- 实验函数：真实 C++ 签名，Python 传 dict/list 自动转。 -->
-    <add-function signature="echo(const vt::Variant&amp;)">
-        <inject-code class="target" position="beginning">
-            PyObject *pyResult{};
-            auto cppResult = echo(cppArg0);
-            pyResult = %CONVERTTOPYTHON[vt::Variant](cppResult);
-            return pyResult;
-        </inject-code>
-    </add-function>
-
-    <add-function signature="echoMap(const vt::VariantMap&amp;)">
-        <inject-code class="target" position="beginning">
-            PyObject *pyResult{};
-            auto cppResult = echoMap(cppArg0);
-            pyResult = %CONVERTTOPYTHON[vt::VariantMap](cppResult);
-            return pyResult;
-        </inject-code>
-    </add-function>
-
-    <!-- 容器类型没有单独注册：依赖 shiboken 内置的 vector / unordered_map 转换器，
-         元素转换复用上面的 vt::Variant 规则。 -->
-    <add-function signature="echoVector(const std::vector&lt;vt::Variant&gt;&amp;)">
-        <inject-code class="target" position="beginning">
-            PyObject *pyResult{};
-            auto cppResult = echoVector(cppArg0);
-            pyResult = %CONVERTTOPYTHON[std::vector&lt;vt::Variant&gt;](cppResult);
-            return pyResult;
-        </inject-code>
-    </add-function>
-
-    <add-function signature="echoUnorderedMap(const std::unordered_map&lt;std::string, vt::Variant&gt;&amp;)">
-        <inject-code class="target" position="beginning">
-            PyObject *pyResult{};
-            auto cppResult = echoUnorderedMap(cppArg0);
-            pyResult = %CONVERTTOPYTHON[std::unordered_map&lt;std::string, vt::Variant&gt;](cppResult);
-            return pyResult;
-        </inject-code>
-    </add-function>
-
-    <!-- ====== 全局函数 ====== -->
+    <!-- ====== 全局函数（真实 C++ 签名） ====== -->
 
     <add-function signature="initTypes()">
         <inject-code class="target" position="beginning">
@@ -126,85 +81,111 @@
 
     <add-function signature="makeSample()">
         <inject-code class="target" position="beginning">
-            return vpy::toPython(makeSample());
-        </inject-code>
-    </add-function>
-
-    <add-function signature="canConvertToPython(PyObject)">
-        <inject-code class="target" position="beginning">
-            vt::Variant value;
-            if (!vpy::fromPython(%1, value)) {
-                PyErr_Clear();
-                return PyBool_FromLong(0);
-            }
-            return PyBool_FromLong(vpy::canConvertToPython(value) ? 1 : 0);
+            auto cppResult = makeSample();
+            return %CONVERTTOPYTHON[vt::Variant](cppResult);
         </inject-code>
     </add-function>
 
     <add-function signature="makeBuiltinSample()">
         <inject-code class="target" position="beginning">
-            return vpy::toPython(makeBuiltinSample());
+            auto cppResult = makeBuiltinSample();
+            return %CONVERTTOPYTHON[vt::Variant](cppResult);
         </inject-code>
     </add-function>
 
-    <add-function signature="sumInts(PyObject)">
+    <add-function signature="echo(const vt::Variant&amp;)">
         <inject-code class="target" position="beginning">
-            const int cppResult = sumInts(%1);
-            if (PyErr_Occurred())
-                return nullptr;
+            auto cppResult = echo(cppArg0);
+            return %CONVERTTOPYTHON[vt::Variant](cppResult);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="echoMap(const vt::VariantMap&amp;)">
+        <inject-code class="target" position="beginning">
+            auto cppResult = echoMap(cppArg0);
+            return %CONVERTTOPYTHON[vt::VariantMap](cppResult);
+        </inject-code>
+    </add-function>
+
+    <!-- 容器没有单独注册：依赖 shiboken 内置的 vector / unordered_map 转换器，
+         元素转换复用上面的 vt::Variant 规则。 -->
+    <add-function signature="echoVector(const std::vector&lt;vt::Variant&gt;&amp;)">
+        <inject-code class="target" position="beginning">
+            auto cppResult = echoVector(cppArg0);
+            return %CONVERTTOPYTHON[std::vector&lt;vt::Variant&gt;](cppResult);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="echoUnorderedMap(const std::unordered_map&lt;std::string, vt::Variant&gt;&amp;)">
+        <inject-code class="target" position="beginning">
+            auto cppResult = echoUnorderedMap(cppArg0);
+            return %CONVERTTOPYTHON[std::unordered_map&lt;std::string, vt::Variant&gt;](cppResult);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="sumInts(const std::vector&lt;int&gt;&amp;)">
+        <inject-code class="target" position="beginning">
+            const int cppResult = sumInts(cppArg0);
             return PyLong_FromLong(cppResult);
         </inject-code>
     </add-function>
 
-    <add-function signature="intMapSize(PyObject)">
+    <add-function signature="intMapSize(const std::unordered_map&lt;int, int&gt;&amp;)">
         <inject-code class="target" position="beginning">
-            const int cppResult = intMapSize(%1);
-            if (PyErr_Occurred())
-                return nullptr;
+            const int cppResult = intMapSize(cppArg0);
             return PyLong_FromLong(cppResult);
         </inject-code>
     </add-function>
 
-    <add-function signature="pyMakeSharedNode(int, const std::string&amp;)">
+    <add-function signature="describeValue(const vt::Variant&amp;)">
         <inject-code class="target" position="beginning">
-            return pyMakeSharedNode(cppArg0, cppArg1);
-        </inject-code>
-    </add-function>
-
-    <add-function signature="pyBorrowSharedNode(int, const std::string&amp;)">
-        <inject-code class="target" position="beginning">
-            return pyBorrowSharedNode(cppArg0, cppArg1);
-        </inject-code>
-    </add-function>
-
-
-
-    <add-function signature="pyEcho(PyObject)">
-        <inject-code class="target" position="beginning">
-            vt::Variant input;
-            if (!vpy::fromPython(%1, input))
-                return nullptr;
-            return vpy::toPython(echo(input));
-        </inject-code>
-    </add-function>
-
-    <add-function signature="pyDescribe(PyObject)">
-        <inject-code class="target" position="beginning">
-            vt::Variant input;
-            if (!vpy::fromPython(%1, input))
-                return nullptr;
-            const std::string text = describeValue(input);
+            const std::string text = describeValue(cppArg0);
             return PyUnicode_DecodeUTF8(text.data(),
                                         static_cast&lt;Py_ssize_t&gt;(text.size()), "strict");
         </inject-code>
     </add-function>
 
-    <!-- 注册类型的演示：object-type 保持对象身份，value-type 按值拷贝 -->
+    <!-- 共享所有权：Python 侧是真正的 SharedNode（带 capsule），不是句柄类型。 -->
+    <add-function signature="makeSharedNode(int, const std::string&amp;)">
+        <inject-code class="target" position="beginning">
+            return makeSharedNodeToPython(cppArg0, cppArg1);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="borrowSharedNode(int, const std::string&amp;)">
+        <inject-code class="target" position="beginning">
+            return borrowSharedNodeToPython(cppArg0, cppArg1);
+        </inject-code>
+    </add-function>
+
+    <!-- 测试持有：替代已删除的 PyDocument，验证跨语言生命周期。 -->
+    <add-function signature="holdPayload(const vt::VariantMap&amp;)">
+        <inject-code class="target" position="beginning">
+            holdPayload(cppArg0);
+            Py_RETURN_NONE;
+        </inject-code>
+    </add-function>
+
+    <add-function signature="heldPayload()">
+        <inject-code class="target" position="beginning">
+            auto cppResult = heldPayload();
+            return %CONVERTTOPYTHON[vt::VariantMap](cppResult);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="releasePayload()">
+        <inject-code class="target" position="beginning">
+            releasePayload();
+            Py_RETURN_NONE;
+        </inject-code>
+    </add-function>
+
+    <!-- ====== 注册类型的演示：object-type 保持对象身份，value-type 按值拷贝 ====== -->
     <object-type name="DemoNode"/>
     <object-type name="SharedNode"/>
     <value-type name="DemoColor"/>
 
-    <!-- 多态基类：Python 可继承并重写 compute()/describe()，
+    <!-- 多态基类：Python 可继承并重写 compute()/describe()/evaluate()/transform()，
          shiboken 为多态类生成 wrapper，C++ 侧虚调用会转发到 Python。 -->
     <object-type name="PluginBase"/>
 

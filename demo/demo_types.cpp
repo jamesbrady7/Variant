@@ -121,6 +121,16 @@ PluginResult PluginBase::evaluate(const PluginRequest& request) const
     return PluginResult(value, trace);
 }
 
+vt::VariantMap PluginBase::transform(const vt::VariantMap& input) const
+{
+    vt::VariantMap out = input;
+    out["plugin_id"] = m_id;
+    out["plugin_name"] = m_name;
+    out["stage"] = std::string("base");
+    out["value"] = input.getAt<int>("value").value_or(0) * 2;
+    return out;
+}
+
 int PluginBase::aliveCount()
 {
     return g_pluginAlive.load();

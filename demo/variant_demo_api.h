@@ -57,3 +57,21 @@ VT_DEMO_API std::unordered_map<std::string, vt::Variant> echoUnorderedMap(
  * @return std::string 调试文本
  */
 VT_DEMO_API std::string describeValue(const vt::Variant& value);
+
+// ---- 测试辅助：由 C++ 静态持有 payload，验证跨语言生命周期 ----
+// 只服务共享所有权测试；不是通用文档 API（PyDocument 已删除）。
+
+/**
+ * @brief 让 C++ 静态变量持有这份 VariantMap。
+ * @param [in] vt::VariantMap 映射表
+ */
+VT_DEMO_API void holdPayload(const vt::VariantMap& payload);
+
+/**
+ * @brief 取回 C++ 当前持有的 VariantMap（拷贝）。
+ * @return vt::VariantMap 映射表
+ */
+VT_DEMO_API vt::VariantMap heldPayload();
+
+/// @brief 释放 C++ 静态变量持有的 payload。
+VT_DEMO_API void releasePayload();

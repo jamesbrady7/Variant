@@ -138,6 +138,18 @@ int main()
               "base: scale -> 7*2=14, trace=base:scale(7,2)");
         check(r2.value() == 15 && r2.trace() == std::string("base:offset(10,5)"),
               "base: offset -> 10+5=15, trace=base:offset(10,5)");
+
+        // VariantMap 直接进虚函数签名：C++ 侧构造 dict 入参，返回也是 VariantMap。
+        const vt::VariantMap baseOut =
+            basePlugin.transform(vt::VariantMap{{"value", 7}, {"tag", "base-input"}});
+        check(baseOut.getAt<int>("value").value_or(0) == 14,
+              "base transform: value 7 -> 14");
+        check(baseOut.getAt<std::string>("stage").value_or("") == std::string("base"),
+              "base transform: stage == base");
+        check(baseOut.getAt<std::string>("plugin_name").value_or("") == std::string("plain-cpp"),
+              "base transform: plugin_name from C++ field");
+        check(baseOut.getAt<std::string>("tag").value_or("") == std::string("base-input"),
+              "base transform: input keys preserved");
     }
 
     // ---------------------------------------------------------- 3. 落盘
@@ -241,6 +253,33 @@ int main()
               "primitive virtual compute(5) -> Python 5*2*3=30");
         check(p->describe() == std::string("python:plugin(py-plugin)"),
               "virtual describe() -> Python prefix + base text");
+
+        // 虚函数参数/返回值直接是 vt::VariantMap：
+        // C++ VariantMap -> Python dict -> super().transform() 回 C++ -> Python 加工
+        // -> dict -> C++ VariantMap。
+        const vt::VariantMap input{{"value", 7}, {"tag", "demo"}};
+        const vt::VariantMap out = p->transform(input);
+        std::printf("      py.transform(value=7) -> stage=%s, value=%d, calls=%d\n",
+                    out.getAt<std::string>("stage").value_or("").c_str(),
+                    out.getAt<int>("value").value_or(0),
+                    out.getAt<int>("calls").value_or(0));
+
+        check(out.getAt<std::string>("stage").value_or("") == std::string("python"),
+              "virtual transform: VariantMap out -> Python override -> VariantMap back");
+        check(out.getAt<int>("value").value_or(0) == 42,
+              "virtual transform: 7*2(base)*3(python)=42");
+        check(out.getAt<int>("plugin_id").value_or(0) == 7,
+              "virtual transform: base field written by super()");
+        check(out.getAt<std::string>("plugin_name").value_or("") == std::string("py-plugin"),
+              "virtual transform: base name survives round trip");
+        check(out.getAt<std::string>("tag").value_or("") == std::string("demo"),
+              "virtual transform: input keys preserved");
+        check(out.getAt<int>("calls").value_or(0) == 1,
+              "virtual transform: Python-side state persists");
+
+        const vt::VariantMap out2 = p->transform(vt::VariantMap{{"value", 1}});
+        check(out2.getAt<int>("calls").value_or(0) == 2,
+              "virtual transform: second call sees accumulated Python state");
     }
 
     // ---------------------------------------------------------- 5. 释放

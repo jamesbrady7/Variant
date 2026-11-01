@@ -8,13 +8,13 @@
 #include <memory>
 #include <string>
 
-PyObject* pyMakeSharedNode(int id, const std::string& name)
+PyObject* makeSharedNodeToPython(int id, const std::string& name)
 {
     std::shared_ptr<SharedNode> node = makeSharedNode(id, name);
     return vpy::toPython(vt::Variant::fromValue(std::move(node)));
 }
 
-PyObject* pyBorrowSharedNode(int id, const std::string& name)
+PyObject* borrowSharedNodeToPython(int id, const std::string& name)
 {
     SharedNode* raw = borrowSharedNode(id, name);
     if (!raw) {

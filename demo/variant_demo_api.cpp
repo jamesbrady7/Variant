@@ -11,6 +11,10 @@
 
 using namespace vt::literals;
 
+namespace {
+vt::VariantMap g_heldPayload;  ///< 测试用：C++ 侧持有的 payload
+}
+
 vt::Variant makeSample()
 {
     vt::Variant root;
@@ -65,4 +69,19 @@ echoUnorderedMap(const std::unordered_map<std::string, vt::Variant>& value)
 std::string describeValue(const vt::Variant& value)
 {
     return vt::describe(value);
+}
+
+void holdPayload(const vt::VariantMap& payload)
+{
+    g_heldPayload = payload;
+}
+
+vt::VariantMap heldPayload()
+{
+    return g_heldPayload;
+}
+
+void releasePayload()
+{
+    g_heldPayload.clear();
 }

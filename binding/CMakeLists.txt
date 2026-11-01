@@ -2,7 +2,6 @@
 add_library(variant_python_bridge STATIC
     src/variant_python.cpp
     src/demo_registration.cpp
-    src/py_document.cpp
     src/builtin_containers.cpp
     src/shared_bridge.cpp
 )
@@ -20,7 +19,6 @@ target_compile_options(variant_python_bridge PRIVATE
 # shiboken 生成的 wrapper 列表（类名小写 + _wrapper.cpp）。
 set(VARIANT_GEN
     ${CMAKE_CURRENT_BINARY_DIR}/variant_binding/variant_binding_module_wrapper.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/variant_binding/pydocument_wrapper.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/variant_binding/demonode_wrapper.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/variant_binding/democolor_wrapper.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/variant_binding/sharednode_wrapper.cpp
@@ -33,7 +31,6 @@ shiboken_generator_create_binding(
     LIBRARY_TARGET variant_core
     TYPESYSTEM_FILE ${CMAKE_CURRENT_SOURCE_DIR}/variant_bindings.xml
     HEADERS
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/py_document.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin_containers.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/shared_bridge.h
         ${CMAKE_SOURCE_DIR}/demo/demo_types.h
@@ -63,9 +60,8 @@ if(MSVC)
     target_compile_options(variant_binding PRIVATE
         "/FI${CMAKE_SOURCE_DIR}/lib/include/vt/variant.h"
         "/FI${CMAKE_SOURCE_DIR}/binding/src/variant_python.h"
-        "/FI${CMAKE_SOURCE_DIR}/binding/src/py_document.h"
-        "/FI${CMAKE_SOURCE_DIR}/binding/src/builtin_containers.h"
         "/FI${CMAKE_SOURCE_DIR}/binding/src/shared_bridge.h"
+        "/FI${CMAKE_SOURCE_DIR}/binding/src/builtin_containers.h"
         "/FI${CMAKE_SOURCE_DIR}/demo/demo_types.h"
         "/FI${CMAKE_SOURCE_DIR}/demo/variant_demo_api.h"
     )

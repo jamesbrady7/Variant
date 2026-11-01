@@ -260,12 +260,11 @@ v.get<Probe>();          // 不需要注册
 ### 4.3 边界预检
 
 ```cpp
-vpy::canConvertToPython(tree);   // 递归检查 map/list/扩展槽
-variant_binding.canConvertToPython(value)   // Python 侧
+vpy::canConvertToPython(tree);   // C++ 侧预检：递归检查 map/list/扩展槽
 ```
 
 未注册类型跨界仍然会**响亮失败**（`TypeError` 带类型名），预检只是让调用方
-能提前判断，而不是在深层元素上才炸。
+能提前判断，而不是在深层元素上才炸。Python 侧不暴露预检函数。
 
 ---
 
@@ -363,9 +362,11 @@ const std::vector<int>* p = cv.extensionPtr<std::vector<int>>();   // 零拷贝�
    如果本来就想共享可变大数组，直接存 `std::shared_ptr<std::vector<int>>`；
    想共享只读则存 `std::shared_ptr<const std::vector<int>>`。
 
-跨 Python 时，`std::vector<int>` 目前没有注册转换器（`canConvertToPython` 为 false）。
-密集数组建议转换成 `array('i')` / numpy 或 `bytes`，而不是 Python `list`
-（每个 Python int 约 28 字节，会把省下的内存全部吃回去）。
+跨 Python 分两种情况：**函数签名**里直接写 `std::vector<int>` 时，shiboken 内置容器
+转换器自动生效；但把 `vector<int>` 放进 Variant **扩展槽**再跨界，需要给扩展槽类型
+注册 hook（`registerCustomToPython`，本项目已在 `registerDemoTypes` 里注册）。
+密集数组如果要交给 Python，转换后仍建议用 `array('i')` / numpy / `bytes`，
+而不是 Python `list`（每个 Python int 约 28 字节，会把省下的内存全部吃回去）。
 
 ### 6.6 整型统一收口：无符号越界必须响亮失败
 

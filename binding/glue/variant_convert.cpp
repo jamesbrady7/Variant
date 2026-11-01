@@ -26,3 +26,14 @@ std::unordered_map<std::string, vt::Variant> map =
     %CONVERTTOCPP[std::unordered_map<std::string, vt::Variant>](%in);
 %out = vt::VariantMap(std::move(map));
 // @snippet variantmap-from-python
+
+// @snippet variantmap-from-python-catchall
+if (!PyDict_Check(%in)) {
+    PyErr_Format(PyExc_TypeError, "vt::VariantMap requires a dict, got %s",
+                 Py_TYPE(%in)->tp_name);
+    return;
+}
+std::unordered_map<std::string, vt::Variant> map =
+    %CONVERTTOCPP[std::unordered_map<std::string, vt::Variant>](%in);
+%out = vt::VariantMap(std::move(map));
+// @snippet variantmap-from-python-catchall

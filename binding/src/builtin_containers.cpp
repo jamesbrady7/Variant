@@ -116,34 +116,15 @@ bool registerBuiltinContainerHooks()
 
 } // namespace vpy
 
-int sumInts(PyObject* value)
+int sumInts(const std::vector<int>& values)
 {
-    vt::Variant converted;
-    if (!vpy::fromPython(value, converted))
-        return -1;
-
-    auto numbers = vt::getAs<std::vector<int>>(converted);
-    if (!numbers) {
-        PyErr_SetString(PyExc_TypeError, "sumInts expects a sequence of integers");
-        return -1;
-    }
-
     long long total = 0;
-    for (int number : *numbers)
+    for (int number : values)
         total += number;
     return static_cast<int>(total);
 }
 
-int intMapSize(PyObject* value)
+int intMapSize(const std::unordered_map<int, int>& values)
 {
-    vt::Variant converted;
-    if (!vpy::fromPython(value, converted))
-        return -1;
-
-    auto numbers = vt::getAs<std::unordered_map<int, int>>(converted);
-    if (!numbers) {
-        PyErr_SetString(PyExc_TypeError, "intMapSize expects a dict with integer keys/values");
-        return -1;
-    }
-    return static_cast<int>(numbers->size());
+    return static_cast<int>(values.size());
 }

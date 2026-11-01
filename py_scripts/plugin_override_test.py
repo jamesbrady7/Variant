@@ -30,6 +30,7 @@ class PyPlugin(vb.PluginBase):
         self.factor = factor
         self.compute_calls = 0
         self.eval_calls = 0
+        self.transform_calls = 0
 
     def compute(self, value):
         self.compute_calls += 1
@@ -45,6 +46,17 @@ class PyPlugin(vb.PluginBase):
         return vb.PluginResult(            # 新的 PluginResult 再传回 C++
             base.value() * self.factor,
             "%s -> python(x%d, call=%d)" % (base.trace(), self.factor, self.eval_calls))
+
+    def transform(self, payload):
+        # payload 是 C++ 构造的 VariantMap，到 Python 就是普通 dict
+        self.transform_calls += 1
+        result = super().transform(payload)          # 回 C++ 基类，返回新 dict
+        result["stage"] = "python"
+        result["factor"] = self.factor
+        result["value"] *= self.factor               # 值类型往返后是 int
+        result["calls"] = self.transform_calls
+        result["input_keys"] = sorted(payload.keys())
+        return result
 
 
 def make_payload():
@@ -65,4 +77,10 @@ if __name__ == "__main__":
     r = p.evaluate(vb.PluginRequest("scale", 3, 4))
     assert r.value() == 24, r.value()                 # 3*4=12, *2=24
     assert r.trace() == "base:scale(3,4) -> python(x2, call=1)", r.trace()
+
+    out = p.transform({"value": 5, "tag": "demo"})
+    assert out["stage"] == "python", out
+    assert out["value"] == 20, out                    # 5*2=10, *2=20
+    assert out["plugin_id"] == 1 and out["plugin_name"] == "standalone", out
+    assert out["tag"] == "demo", out                  # 输入键原样保留
     print("plugin_override_test.py: Python subclass works")

@@ -25,8 +25,8 @@ root.at("missing.key"_path);                                     // 抛结构化
 | 目录 | 内容 |
 | --- | --- |
 | `lib/` | `variant_core`：Variant / VariantMap / VariantList / Path / VariantDocument / TypeRegistry / JSON / 二进制 / Codec |
-| `demo/` | `variant_demo`：演示注册用的 DemoNode（对象）/ DemoColor（值） |
-| `tests/` | 174 项核心单测 + 1812 项序列化检查 + 38 项共享所有权检查 |
+| `demo/` | `variant_demo`：DemoNode（对象）/ DemoColor（值）/ SharedNode（共享）/ PluginBase（多态基类）+ 真实签名演示函数 |
+| `tests/` | 174 项核心单测 + 1812 项序列化检查 + 33 项共享所有权 + 31 项继承/虚函数检查 |
 | `bench/` | 与 QVariant 的对比基准（Qt5 Core，可选） |
 | `binding/` | shiboken 绑定 + Python 桥接（`variant_python_bridge`） |
 | `exe/` | 内嵌 Python 的 C++ runner |
@@ -48,8 +48,8 @@ cmake --build build --config Release
 build/bin/Release/vt_tests.exe          # 核心单测，退出码 = 失败数
 build/bin/Release/vt_serial_tests.exe   # JSON / 二进制 / codec 测试
 build/bin/Release/vt_shared_tests.exe   # 共享所有权（C++ runner 启动 Python 测试）
-build/bin/Release/vt_plugin_override_test.exe  # Python 继承 C++ 多态类 + 自定义值类型往返 + 释放验证（20 项）
-build/bin/Release/variant_demo_app.exe  # C++ + Python 往返演示（41 项断言）
+build/bin/Release/vt_plugin_override_test.exe  # Python 继承 C++ + 虚函数 VariantMap 往返 + 释放验证（31 项）
+build/bin/Release/variant_demo_app.exe  # C++ + Python 往返演示（37 项断言）
 
 # benchmark 需要 Qt5 的 DLL
 PATH="/d/Qt/5.15.2/msvc2019_64/bin:$PATH" build/bin/Release/vt_bench.exe
@@ -70,11 +70,13 @@ python py_scripts/demo.py
 - map/list 用 `shared_ptr` 间接持有并实现写时复制；**只读请用 `const` 引用**，
   非 const 的 `asMap()` 会 detach。
 - 路径可预编译成 `vt::Path`，热循环里复用（39ns vs 281ns / 次）。
-- Python 侧不出现 `Variant` 类：C++ 的 Variant 自动对应原生
-  `None/bool/int/float/str/list/dict`；注册过的绑定类型按注册表转换。
+- Python 侧不出现 `Variant` 类：C++ 函数签名直接写 `vt::Variant` / `vt::VariantMap`，
+  Python 侧自动对应原生 `None/bool/int/float/str/list/dict`；标准容器
+  （`vector<Variant>`、`unordered_map<string,Variant>` 等）不逐个注册，
+  由 shiboken 内置容器转换器 + 元素规则递归完成。
 - C++ 侧存扩展类型**不需要注册**（就是 `std::any`）；注册只服务于边界：
-  `registerPointerType/registerValueType` 一行同时登记稳定名字和 Python 转换器，
-  `canConvertToPython(tree)` 可在跨界前预检整棵树。
+  `registerPointerType/registerValueType` 一行同时登记稳定名字和 Python 转换器。
+  C++ 侧可用 `vpy::canConvertToPython(tree)` 预检整棵树。
 - 内建容器：`vector<Variant>` / `map<string,Variant>` 规范化为原生 List/Map；`vector<int>`、`vector<string>`、`map<string,string>`、`map<int,int>` 走紧凑扩展槽，`getAs<T>` 可从扩展槽或 Flatten 后的 List/Map 恢复。
 - 共享所有权：C++ 侧存 `std::shared_ptr<T>`，Python 侧仍是 `T`；内部用 PyCapsule/keep-alive deleter 管生命周期，借用对象在边界被拒绝。详见使用手册 4.8。
 - 序列化：`vt::json::write/read`、`vt::binary::write/read`，以及流/文件接口 `writeTo/readFrom`、`writeFile/readFile`；扩展类型通过

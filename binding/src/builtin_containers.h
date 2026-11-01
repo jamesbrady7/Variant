@@ -1,13 +1,8 @@
 #pragma once
 
 // 内建容器的 Python 转换（不依赖 shiboken SpecificConverter）。
-#if defined(Py_LIMITED_API)
-#undef Py_LIMITED_API
-#endif
-
-#include <Python.h>
-
-#include "vt/variant.h"
+#include <unordered_map>
+#include <vector>
 
 namespace vpy {
 
@@ -22,15 +17,15 @@ bool registerBuiltinContainerHooks();
 } // namespace vpy
 
 /**
- * @brief 演示/测试：Python list -> Variant -> getAs<vector<int>> 求和。
- * @param [in] PyObject* Python 序列
- * @return int 和；失败返回 -1 并设置 Python 异常
+ * @brief 演示/测试：`vector<int>` 的真实签名（Python list 自动转换）。
+ * @param [in] std::vector<int> 整数序列
+ * @return int 和
  */
-int sumInts(PyObject* value);
+int sumInts(const std::vector<int>& values);
 
 /**
- * @brief 演示/测试：Python dict[int,int] -> Variant -> getAs<map<int,int>> 取大小。
- * @param [in] PyObject* Python 字典
- * @return int 元素个数；失败返回 -1 并设置 Python 异常
+ * @brief 演示/测试：`unordered_map<int,int>` 的真实签名（Python dict 自动转换）。
+ * @param [in] std::unordered_map<int,int> 整数映射表
+ * @return int 元素个数
  */
-int intMapSize(PyObject* value);
+int intMapSize(const std::unordered_map<int, int>& values);

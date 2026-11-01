@@ -2,6 +2,8 @@
 
 #include "export.h"
 
+#include "vt/variant_map.h"
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -309,6 +311,17 @@ public:
      * @return PluginResult 求值结果
      */
     virtual PluginResult evaluate(const PluginRequest& request) const;
+
+    /**
+     * @brief 可被 Python 重写的映射变换；参数与返回值都是 `vt::VariantMap`。
+     *
+     * 基类实现把输入原样复制，再写入 `plugin_id` / `plugin_name` / `stage="base"`，
+     * 并把 `value` 乘 2（缺失按 0）。Python 子类重写后，C++ 调用会派发到 Python，
+     * 两侧看到的是原生 dict。
+     * @param [in] vt::VariantMap 输入映射表
+     * @return vt::VariantMap 变换后的映射表
+     */
+    virtual vt::VariantMap transform(const vt::VariantMap& input) const;
 
     /// @brief 当前存活的 PluginBase 数量（测试用，含 Python 子类）。
     static int aliveCount();

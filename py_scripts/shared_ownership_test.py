@@ -2,6 +2,10 @@
 
 由 C++ runner `vt_shared_tests` 启动；也可以单独运行：
     python py_scripts/shared_ownership_test.py
+
+Python 侧只使用真实签名：
+    vb.holdPayload(dict) / vb.heldPayload() / vb.releasePayload()
+C++ 侧静态持有 payload，替代已删除的 PyDocument。
 """
 
 import gc
@@ -28,18 +32,42 @@ def alive():
     return vb.SharedNode.aliveCount()
 
 
+def expect_type_error(fn, message):
+    try:
+        fn()
+    except TypeError as exc:
+        print("  expected TypeError:", exc)
+        check(True, message)
+    else:
+        raise AssertionError(message + "（没有抛 TypeError）")
+
+
 def run():
+    # ---------------------------------------------------------------- 0. 注册顺序
+    print("=== 0. 注册顺序：原生数据无需注册，扩展对象必须响亮失败 ===")
+    native = {"a": [1, None, "x"], "nested": {"flag": True}}
+    check(vb.echoMap(native) == native, "未 initTypes() 时原生 dict 仍可往返")
+    expect_type_error(
+        lambda: vb.echo(vb.DemoNode(1, "unregistered")),
+        "未注册的扩展对象转 Variant 必须抛 TypeError")
+
     vb.initTypes()
+    node_for_order = vb.DemoNode(2, "registered")
+    check(vb.echo(node_for_order) is node_for_order,
+          "initTypes() 后同一个扩展对象身份往返")
+    del node_for_order
+    gc.collect()
+
     baseline = alive()
     print("baseline alive =", baseline)
 
+    # ---------------------------------------------------------------- 1. 收养
     print("\n=== 1. Python 创建的对象：收养 + 身份 ===")
     node = vb.SharedNode(101, "py-node")
     check(alive() == baseline + 1, "Python 构造后计数 +1")
 
-    doc = vb.PyDocument()
-    check(vb.pyDocSet(doc, "root.node", node), "放进 Variant 成功")
-    back = vb.pyDocGet(doc, "root.node")
+    vb.holdPayload({"root": {"node": node}})
+    back = vb.heldPayload()["root"]["node"]
     check(back is node, "取回的是同一个 Python 对象（收养保留身份）")
     check(alive() == baseline + 1, "Variant 持有期间对象不重复创建")
 
@@ -48,100 +76,88 @@ def run():
 
     del node
     gc.collect()
-    check(alive() == baseline + 1, "删除 Python 变量后 Variant 仍保活")
-    check(back.name() == "renamed", "Variant 保留期间 wrapper 仍可用")
+    check(alive() == baseline + 1, "删除 Python 变量后 C++ 仍保活")
+    check(back.name() == "renamed", "C++ 保留期间 wrapper 仍可用")
 
     del back
     gc.collect()
-    check(alive() == baseline + 1, "删除 wrapper 后 Variant 仍保活")
-    again = vb.pyDocGet(doc, "root.node")
+    check(alive() == baseline + 1, "删除 wrapper 后 C++ 仍保活")
+    again = vb.heldPayload()["root"]["node"]
     check(again.name() == "renamed", "再次读取仍得到原对象")
 
-    doc.clear()
+    vb.releasePayload()
     del again
     gc.collect()
-    check(alive() == baseline, "Variant 释放后对象析构")
+    check(alive() == baseline, "releasePayload() 后对象析构")
 
+    # ---------------------------------------------------------------- 2. 同一对象多次
     print("\n=== 2. 同一个对象多次放入 Variant ===")
     node = vb.SharedNode(102, "multi")
-    doc = vb.PyDocument()
-    check(vb.pyDocSet(doc, "a", node), "写入 a")
-    check(vb.pyDocSet(doc, "b", node), "写入 b")
+    vb.holdPayload({"a": node, "b": node, "deep": [node, {"inner": node}]})
     check(alive() == baseline + 1, "同一对象只应有一个实例")
     del node
     gc.collect()
-    a = vb.pyDocGet(doc, "a")
-    b = vb.pyDocGet(doc, "b")
-    check(a is b, "两个路径取回同一个对象")
+
+    payload = vb.heldPayload()
+    check(payload["a"] is payload["b"], "两个路径取回同一个对象")
+    check(payload["deep"][0] is payload["a"], "list 元素身份保持")
+    check(payload["deep"][1]["inner"] is payload["a"], "嵌套 dict 身份保持")
     check(alive() == baseline + 1, "多次收养不重复计数")
-    doc.clear()
-    del a, b
+    vb.releasePayload()
+    del payload
     gc.collect()
     check(alive() == baseline, "释放后回到 baseline")
 
-    print("\n=== 3. 嵌套在 dict/list 中 ===")
-    node = vb.SharedNode(103, "nested")
-    doc = vb.PyDocument()
-    payload = {"items": [node, {"inner": node}], "scalar": 1}
-    check(vb.pyDocSet(doc, "tree", payload), "嵌套 dict/list 写入")
-    got = vb.pyDocGet(doc, "tree")
-    check(got["items"][0] is node, "list 元素身份保持")
-    check(got["items"][1]["inner"] is node, "嵌套 dict 身份保持")
-    del node
-    gc.collect()
-    check(got["items"][0].name() == "nested", "删除 Python 变量后嵌套对象仍可用")
-    check(alive() == baseline + 1, "嵌套引用只计一份")
-    doc.clear()
-    del got, payload
-    gc.collect()
-    check(alive() == baseline, "清空后回到 baseline")
-
-    print("\n=== 4. C++ 工厂创建的 shared_ptr 对象 ===")
-    cpp_node = vb.pyMakeSharedNode(201, "cpp-node")
+    # ---------------------------------------------------------------- 3. C++ 工厂
+    print("\n=== 3. C++ 工厂创建的 shared_ptr 对象 ===")
+    cpp_node = vb.makeSharedNode(201, "cpp-node")
     check(isinstance(cpp_node, vb.SharedNode), "工厂返回真正的 SharedNode")
     check(alive() == baseline + 1, "C++ 工厂创建计数 +1")
 
-    doc = vb.PyDocument()
-    check(vb.pyDocSet(doc, "c", cpp_node), "工厂对象放进 Variant")
-    same = vb.pyDocGet(doc, "c")
+    vb.holdPayload({"c": cpp_node})
+    same = vb.heldPayload()["c"]
     check(same is cpp_node, "C++ shared_ptr 路径保持 wrapper 身份")
 
     del cpp_node
     gc.collect()
     check(alive() == baseline + 1 and same.name() == "cpp-node",
-          "删除 Python 变量后 Variant 仍保活")
+          "删除 Python 变量后 C++ 仍保活")
     del same
     gc.collect()
-    check(alive() == baseline + 1, "删除 wrapper 后 Variant 仍保活")
-    again = vb.pyDocGet(doc, "c")
+    check(alive() == baseline + 1, "删除 wrapper 后 C++ 仍保活")
+    again = vb.heldPayload()["c"]
     check(again.name() == "cpp-node", "再次读取仍可用")
-    doc.clear()
+    vb.releasePayload()
     del again
     gc.collect()
-    check(alive() == baseline, "Variant 释放后析构")
+    check(alive() == baseline, "释放后析构")
 
     # 不进 Variant 的工厂对象，删除即析构
-    temp = vb.pyMakeSharedNode(202, "temp")
+    temp = vb.makeSharedNode(202, "temp")
     check(alive() == baseline + 1, "临时工厂对象存活")
     del temp
     gc.collect()
     check(alive() == baseline, "删除临时工厂对象后析构")
 
-    print("\n=== 5. 借用对象必须被拒绝 ===")
-    borrowed = vb.pyBorrowSharedNode(301, "borrowed")
+    # ---------------------------------------------------------------- 4. 借用拒绝
+    print("\n=== 4. 借用对象必须被拒绝 ===")
+    borrowed = vb.borrowSharedNode(301, "borrowed")
     check(isinstance(borrowed, vb.SharedNode), "借用对象也是 SharedNode")
     check(borrowed.name() == "borrowed", "借用对象可正常读取")
 
     before_borrowed = alive()
-    doc = vb.PyDocument()
-    ok = vb.pyDocSet(doc, "borrowed", borrowed)
-    check(not ok, "借用对象写入 Variant 必须失败")
-    check("borrowed" in doc.lastError().lower(), "lastError 说明是借用对象")
+    vb.holdPayload({"ok": 1})
+    expect_type_error(
+        lambda: vb.holdPayload({"borrowed": borrowed}),
+        "借用对象写入 VariantMap 必须失败")
+    check(vb.heldPayload() == {"ok": 1},
+          "失败不产生半成品：C++ 仍持有上一次的 payload")
+    vb.releasePayload()
     check(borrowed.name() == "borrowed", "失败后借用对象仍可用")
-    doc.clear()
     del borrowed
     gc.collect()
-    check(alive() == before_borrowed, "借用对象由 C++ 静态容器持有，不会因 Python 释放而析构")
+    check(alive() == before_borrowed,
+          "借用对象由 C++ 静态容器持有，不会因 Python 释放而析构")
 
     print(f"\nShared ownership tests: {_checks} checks passed.")
     return _checks

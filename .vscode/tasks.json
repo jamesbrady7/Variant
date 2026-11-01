@@ -69,7 +69,7 @@
             "presentation": { "reveal": "always", "panel": "dedicated" }
         },
         {
-            // Python 继承 C++ 多态类 + VariantMap 接收 shared_ptr + 释放验证（16 项断言）
+            // Python 继承 C++ 多态类 + 虚函数 VariantMap 往返 + 释放验证（31 项断言）
             "label": "Run: Python override demo (Release)",
             "type": "process",
             "command": "${workspaceFolder}/build/bin/Release/vt_plugin_override_test.exe",
@@ -78,7 +78,7 @@
             "presentation": { "reveal": "always", "panel": "dedicated" }
         },
         {
-            // C++ runner 内嵌 Python，跑 py_scripts/shared_ownership_test.py（38 项断言）
+            // C++ runner 内嵌 Python，跑 py_scripts/shared_ownership_test.py（33 项断言）
             "label": "Run: shared ownership tests (Release)",
             "type": "process",
             "command": "${workspaceFolder}/build/bin/Release/vt_shared_tests.exe",
