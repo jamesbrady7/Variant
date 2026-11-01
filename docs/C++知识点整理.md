@@ -319,6 +319,30 @@ C++17 下是运行时解析，热循环请预编译 `vt::Path`。
 写十进制文本（可逆）；无法字符串化的键只能退化成 `[[k,v], ...]` 保留类型。
 **凡是要"字符串键 + 类型还原"的地方，都要在文档里写清键的文本约定。**
 
+## 5.2 一份遍历、多个 Sink：把"怎么走"和"往哪写"分开
+
+类型擦除后的容器要服务多个边界（Variant 正规形 / 序列化 / Python），它们的
+**结构遍历完全一样，只有叶子与键的写法不同**。把遍历写成虚接口的事件流：
+
+```cpp
+struct ValueSink {              // 核心不依赖 Python / JSON
+    virtual void onInt(std::int64_t) = 0;
+    virtual void onString(std::string_view) = 0;
+    virtual void onListBegin(std::size_t) = 0;   // ... onListEnd
+    virtual MapKeyForm onMapBegin(std::size_t, bool keyConvertible) = 0;
+    virtual void onEntryBegin() = 0;             // ... onEntryEnd
+};
+```
+
+- 递归模板 `visitValue<T>` 只写一份，编译期展开，无运行期类型查表开销；
+- `onMapBegin` 返回 `MapKeyForm`：**编译期**算出键能不能字符串化（
+  `map_key_traits<Key>::convertible`），Sink 只能在这个前提下选写法——
+  "能不能"归编译期，"愿不愿意"归边界；
+- 这比"先归一化成中间表示再各自转换"少一次编码/解码，也让不同边界可以保留
+  不同的精度（JSON 只能字符串键，Python 可以保留 int 键）；
+- 虚函数调用的粒度是"事件"，不是"元素"：每个元素一次固定开销，值得换掉
+  三份重复的递归代码。
+
 ---
 
 ## 6. 其他工程实证

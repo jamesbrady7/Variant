@@ -619,6 +619,77 @@ void testPathRoundTrip()
     }
 }
 
+/// 记录事件流的测试用 Sink：验证"编译器算出来的键形态"确实交给了 sink。
+class TraceSink final : public vt::detail::ValueSink {
+public:
+    explicit TraceSink(vt::detail::MapKeyForm wanted) : m_wanted(wanted) {}
+
+    void onNull() override { m_trace += "null;"; }
+    void onBool(bool) override { m_trace += "bool;"; }
+    void onInt(std::int64_t value) override { m_trace += "int:" + std::to_string(value) + ";"; }
+    void onDouble(double) override { m_trace += "double;"; }
+    void onString(std::string_view value) override
+    {
+        m_trace += "str:";
+        m_trace += std::string(value);
+        m_trace += ";";
+    }
+    void onVariant(const vt::Variant&) override { m_trace += "variant;"; }
+    void onExtension(const std::any&) override { m_trace += "ext;"; }
+
+    void onListBegin(std::size_t) override { m_trace += "["; }
+    void onListEnd() override { m_trace += "];"; }
+
+    vt::detail::MapKeyForm onMapBegin(std::size_t, bool keyConvertible) override
+    {
+        m_convertible = keyConvertible;
+        m_trace += "{";
+        return m_wanted;
+    }
+    void onMapEnd() override { m_trace += "};"; }
+    void onEntryBegin() override { m_trace += "entry("; }
+    void onEntryEnd() override { m_trace += ");"; }
+
+    const std::string& trace() const { return m_trace; }
+    bool lastConvertible() const { return m_convertible; }
+
+private:
+    vt::detail::MapKeyForm m_wanted;
+    std::string m_trace;
+    bool m_convertible = false;
+};
+
+void testValueSink()
+{
+    // 1) 键可字符串化，但边界要 Typed（Python）：键按原类型发事件。
+    {
+        TraceSink sink(vt::detail::MapKeyForm::Typed);
+        vt::detail::visitValue(std::map<int, std::string>{{7, "seven"}}, sink);
+        CHECK_EQ(sink.trace(), std::string("{entry(int:7;str:seven;);};"));
+        CHECK(sink.lastConvertible());
+    }
+
+    // 2) 同一个值，边界要 Text（序列化）：键是字符串事件。
+    {
+        TraceSink sink(vt::detail::MapKeyForm::Text);
+        vt::detail::visitValue(std::map<int, std::string>{{7, "seven"}}, sink);
+        CHECK_EQ(sink.trace(), std::string("{entry(str:7;str:seven;);};"));
+    }
+
+    // 3) 键不可字符串化：Text 请求无效，visitor 强制 Typed。
+    {
+        TraceSink sink(vt::detail::MapKeyForm::Text);
+        vt::detail::visitValue(std::map<std::vector<int>, int>{{{1}, 2}}, sink);
+        CHECK_EQ(sink.trace(), std::string("{entry([int:1;];int:2;);};"));
+        CHECK(!sink.lastConvertible());
+    }
+
+    // 4) normalizeToVariant 仍是 VariantSink 的包装（序列化侧 Text 键）。
+    const vt::Variant normalized = vt::detail::normalizeToVariant(std::map<int, int>{{7, 8}});
+    CHECK(normalized.isMap());
+    CHECK_EQ(normalized.asMap().at("7").asInt(), 8);
+}
+
 } // namespace
 
 int main()
@@ -656,6 +727,7 @@ int main()
     RUN(testSharedPointerStorage);
     RUN(testExtension);
     RUN(testNestedContainers);
+    RUN(testValueSink);
     RUN(testDocument);
     RUN(testEqualityAndDescribe);
     RUN(testPathRoundTrip);

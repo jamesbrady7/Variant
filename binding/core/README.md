@@ -7,14 +7,16 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `variant_python.h` / `variant_python.cpp` | Hook 表、`toPython/fromPython`、`registerPointerType/ValueType/SharedType`、共享所有权（capsule/收养） |
+| `variant_python.h` / `variant_python.cpp` | Hook 表、`toPython/fromPython`、`registerPointerType/ValueType/SharedType`、共享所有权（capsule/收养）、`PySink` |
 | `glue/variant_convert.cpp` | 由 typesystem 用 `// @snippet` 抽取的转换片段，不直接编译 |
+| `variant_bindings.xml` 的 CORE 段 | 见下面"typesystem" |
 
 > **标准容器不需要任何注册**：`Variant::fromValue` 遇到 `vector/map/set/pair/array`
-> （及其任意嵌套）时，会按 `vt/container_traits.h` 自动登记归一化函数，
-> `toPython` 的扩展槽回退会用它展开成原生 list/dict。旧的
-> `container_hooks.*`（逐类型手写 hook）已删除，内嵌容器不再需要单独适配。
-| `variant_bindings.xml` 的 CORE 段 | 见下面"typesystem" |
+> （及其任意嵌套）时，会按 `vt/container_traits.h` 自动登记遍历函数（编译期递归 +
+> `ValueSink` 事件流），`toPython` 的扩展槽分支用 `PySink` 把事件直接写成原生
+> list/dict。旧的 `container_hooks.*`（逐类型手写 hook）已删除，内嵌容器不再需要
+> 单独适配。Python 侧映射键保留真实类型（`map<int,int>` -> `{7: 2}`），
+> 只有序列化侧才把键写成文本。
 
 ## typesystem
 

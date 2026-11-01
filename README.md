@@ -78,7 +78,8 @@ python py_scripts/demo.py
 - C++ 侧存扩展类型**不需要注册**（就是 `std::any`）；注册只服务于边界：
   `registerPointerType/registerValueType` 一行同时登记稳定名字和 Python 转换器。
   C++ 侧可用 `vpy::canConvertToPython(tree)` 预检整棵树。
-- 内建容器：`vector<Variant>` / `map<string,Variant>` 规范化为原生 List/Map；其余容器整体走紧凑扩展槽。`vt/container_traits.h` 覆盖 `vector/list/deque/set/unordered_set/array/map/unordered_map/pair`，`Variant::fromValue` 首次见到类型时自动登记归一化函数与 plain codec——**任意嵌套（如 `vector<vector<int>>`）无需注册**即可跨语言、序列化、`getAs<T>` 往返。
+- 内建容器：`vector<Variant>` / `map<string,Variant>` 规范化为原生 List/Map；其余容器整体走紧凑扩展槽。`vt/container_traits.h` 覆盖 `vector/list/deque/set/unordered_set/array/map/unordered_map/pair`，`Variant::fromValue` 首次见到类型时自动登记遍历函数与 plain codec——**任意嵌套（如 `vector<vector<int>>`）无需注册**即可跨语言、序列化、`getAs<T>` 往返。
+- 一份编译期递归 + 两个 Sink：`VariantSink` 产出 Variant 正规形（JSON/二进制），`PySink` 直接产出 `PyObject*`。因此 **C++ → Python 保留真实键类型**（`map<int,int>` 是 `{7: 2}`），JSON 侧键仍是字符串；反向 dict → C++ 仍字符串化，由 `getAs<T>` 解析回来。
 - 共享所有权：C++ 侧存 `std::shared_ptr<T>`，Python 侧仍是 `T`；内部用 PyCapsule/keep-alive deleter 管生命周期，借用对象在边界被拒绝。详见使用手册 4.8。
 - 序列化：`vt::json::write/read`、`vt::binary::write/read`，以及流/文件接口 `writeTo/readFrom`、`writeFile/readFile`；扩展类型通过
   `registerValueCodec/registerPointerCodec` 注册一次，JSON 和二进制共用；
