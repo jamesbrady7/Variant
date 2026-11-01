@@ -10,6 +10,7 @@
 
 #include <any>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -18,6 +19,7 @@
 #include <type_traits>
 #include <typeinfo>
 #include <utility>
+#include <vector>
 
 namespace vt {
 
@@ -27,8 +29,68 @@ std::optional<T> getAs(const Variant& value);
 
 namespace detail {
 
-/// 归一化函数：扩展槽里的容器 -> 只含内建类型的 Variant。
-using NormalizerFn = Variant (*)(const std::any&);
+/**
+ * @brief 映射键的表示方式。
+ *
+ * - `Text`：键可无损写成文本（`map_key_traits<Key>::convertible` 为真），
+ *   visitor 以字符串事件发出键；
+ * - `Typed`：键不能字符串化，visitor 按原类型递归发出键。
+ */
+enum class MapKeyForm { Text, Typed };
+
+/**
+ * @brief 值遍历的接收端（Sink）。
+ *
+ * `visitValue` 只做一份编译期递归，把值拆成与目标表示无关的事件流：
+ * - 序列 / pair：`onListBegin` -> 元素 -> `onListEnd`；
+ * - 映射：`onMapBegin` -> 每个条目 `onEntryBegin` -> 键 -> 值 -> `onEntryEnd` -> `onMapEnd`；
+ * - 叶子：`onNull/onBool/onInt/onDouble/onString/onVariant/onExtension`。
+ *
+ * 两个实现：
+ * - `VariantSink`：重建 Variant 正规形（JSON / 二进制 / codec 用）；
+ * - `PySink`（binding）：直接产出 `PyObject*`，映射键保留真实类型。
+ */
+struct ValueSink {
+    virtual ~ValueSink() = default;
+
+    /// @brief 空值。
+    virtual void onNull() = 0;
+    /// @brief bool 叶子。
+    virtual void onBool(bool value) = 0;
+    /// @brief 整数叶子（统一 int64，越界规则与 `Variant` 一致）。
+    virtual void onInt(std::int64_t value) = 0;
+    /// @brief 浮点叶子。
+    virtual void onDouble(double value) = 0;
+    /// @brief UTF-8 字符串叶子。
+    virtual void onString(std::string_view value) = 0;
+    /// @brief 已经成型的 `Variant`（不拆解，由 sink 决定原样保留还是继续转换）。
+    virtual void onVariant(const Variant& value) = 0;
+    /// @brief 扩展槽叶子（自定义类型）。
+    virtual void onExtension(const std::any& value) = 0;
+
+    /// @brief 序列开始。
+    /// @param [in] size 元素个数
+    virtual void onListBegin(std::size_t size) = 0;
+    /// @brief 序列结束。
+    virtual void onListEnd() = 0;
+
+    /**
+     * @brief 映射开始。
+     * @param [in] size 条目数
+     * @param [in] keyConvertible 键类型是否可无损字符串化
+     * @return MapKeyForm 本次遍历采用的键形态（`Text` 只在 keyConvertible 时有效）
+     */
+    virtual MapKeyForm onMapBegin(std::size_t size, bool keyConvertible) = 0;
+    /// @brief 映射结束。
+    virtual void onMapEnd() = 0;
+    /// @brief 一个键值条目开始。
+    virtual void onEntryBegin() = 0;
+    /// @brief 一个键值条目结束。
+    virtual void onEntryEnd() = 0;
+};
+
+/// 归一化函数：把扩展槽里的容器按事件流写给 sink。
+using NormalizerFn = void (*)(const std::any&, ValueSink&);
 
 /**
  * @brief 登记一个扩展类型的归一化函数（Python 桥在扩展槽转换失败时使用）。
@@ -143,73 +205,241 @@ std::string stableTypeName()
     }
 }
 
-// ------------------------------------------------------------ 归一化
+// ------------------------------------------------------------ 值遍历
 
 /**
- * @brief 递归归一化：把任意支持的容器变成只含内建类型的 Variant。
+ * @brief 编译期递归：把容器 / 叶子拆成 `ValueSink` 事件流。
  *
- * - 序列容器 -> List（元素递归）；
- * - 映射容器 -> 键可字符串化时是 Map（键写成十进制/文本），否则是 `[[k,v], ...]`；
- * - `std::pair` -> 两元素 List；
- * - 其他类型（叶子）-> `Variant::fromValue`，标量进热槽、其余进扩展槽。
+ * 规则与 `container_traits` 一致，与目标表示无关：
+ * - `Variant` 原样交给 sink（`onVariant`）；
+ * - Sequence / Pair -> List 事件；
+ * - Map -> Map 事件（键形态由 sink 在 `onMapBegin` 决定）；
+ * - 标量 / 字符串 -> 对应叶子事件；
+ * - 其他类型 -> `onExtension`。
  *
  * 叶子不做任何猜测：`container_traits` 没有特化的类型一律原样存放。
  * @param [in] T 容器或叶子值
- * @return Variant 归一化结果
+ * @param [in] ValueSink 接收端
  */
 template <class T>
-Variant normalizeToVariant(const T& value);
-
-template <class T>
-Variant normalizeMapToVariant(const T& value)
-{
-    using Traits = container_traits<std::decay_t<T>>;
-    using Key = typename Traits::key_type;
-
-    if constexpr (map_key_traits<Key>::convertible) {
-        VariantMap map;
-        map.reserve(value.size());
-        for (const auto& kv : value)
-            map[map_key_traits<Key>::toKey(kv.first)] = normalizeToVariant(kv.second);
-        return Variant(std::move(map));
-    } else {
-        VariantList pairs;
-        pairs.reserve(value.size());
-        for (const auto& kv : value) {
-            VariantList pair;
-            pair.push_back(normalizeToVariant(kv.first));
-            pair.push_back(normalizeToVariant(kv.second));
-            pairs.push_back(std::move(pair));
-        }
-        return Variant(std::move(pairs));
-    }
-}
-
-template <class T>
-Variant normalizeToVariant(const T& value)
+void visitValue(const T& value, ValueSink& sink)
 {
     using U = std::decay_t<T>;
     using Traits = container_traits<U>;
 
     if constexpr (std::is_same_v<U, Variant>) {
-        return value;
+        sink.onVariant(value);
     } else if constexpr (Traits::shape == ContainerShape::Sequence) {
-        VariantList list;
-        if constexpr (has_reserve_v<VariantList>)
-            list.reserve(value.size());
+        sink.onListBegin(value.size());
         for (const auto& item : value)
-            list.push_back(normalizeToVariant(item));
-        return Variant(std::move(list));
+            visitValue(item, sink);
+        sink.onListEnd();
     } else if constexpr (Traits::shape == ContainerShape::Map) {
-        return normalizeMapToVariant(value);
+        using Key = typename Traits::key_type;
+        constexpr bool convertible = map_key_traits<Key>::convertible;
+
+        const MapKeyForm wanted = sink.onMapBegin(value.size(), convertible);
+        const MapKeyForm form =
+            (convertible && wanted == MapKeyForm::Text) ? MapKeyForm::Text : MapKeyForm::Typed;
+        for (const auto& kv : value) {
+            sink.onEntryBegin();
+            if constexpr (convertible) {
+                if (form == MapKeyForm::Text)
+                    sink.onString(map_key_traits<Key>::toKey(kv.first));
+                else
+                    visitValue(kv.first, sink);
+            } else {
+                visitValue(kv.first, sink);
+            }
+            visitValue(kv.second, sink);
+            sink.onEntryEnd();
+        }
+        sink.onMapEnd();
     } else if constexpr (Traits::shape == ContainerShape::Pair) {
-        VariantList list;
-        list.push_back(normalizeToVariant(value.first));
-        list.push_back(normalizeToVariant(value.second));
-        return Variant(std::move(list));
+        sink.onListBegin(2);
+        visitValue(value.first, sink);
+        visitValue(value.second, sink);
+        sink.onListEnd();
+    } else if constexpr (std::is_same_v<U, bool>) {
+        sink.onBool(value);
+    } else if constexpr (std::is_integral_v<U>) {
+        // 与 `Variant` 的整型构造共用同一条规则：无符号越界抛 OutOfRange。
+        const Variant scalar{value};
+        sink.onInt(scalar.asInt());
+    } else if constexpr (std::is_floating_point_v<U>) {
+        sink.onDouble(static_cast<double>(value));
+    } else if constexpr (std::is_same_v<U, std::string>) {
+        sink.onString(value);
+    } else if constexpr (std::is_same_v<U, std::string_view>) {
+        sink.onString(value);
+    } else if constexpr (std::is_same_v<U, const char*> || std::is_same_v<U, char*>) {
+        if (value == nullptr)
+            sink.onNull();
+        else
+            sink.onString(value);
+    } else if constexpr (std::is_same_v<U, std::nullptr_t>) {
+        sink.onNull();
     } else {
-        return Variant::fromValue(value);
+        sink.onExtension(std::any(value));
     }
+}
+
+/**
+ * @brief 把事件流重建为 Variant 正规形（JSON / 二进制 / codec 的编码路径）。
+ *
+ * 行为与改造前逐字节一致：
+ * - List / Pair -> List；
+ * - 可字符串化的 Map 键 -> Map（键写十进制/文本）；
+ * - 不可字符串化的 Map 键 -> `[[k,v], ...]`。
+ */
+class VariantSink final : public ValueSink {
+public:
+    /// @brief 取出构建结果（调用时遍历必须已结束）。
+    /// @return Variant 归一化结果
+    Variant take() { return std::move(m_root); }
+
+    void onNull() override { emit(Variant()); }
+    void onBool(bool value) override { emit(Variant(value)); }
+    void onInt(std::int64_t value) override { emit(Variant(value)); }
+    void onDouble(double value) override { emit(Variant(value)); }
+
+    void onString(std::string_view value) override
+    {
+        // Text 形态的映射键以字符串事件发出；条目里的第一个字符串就是键。
+        if (Frame* frame = textMapFrame()) {
+            if (!frame->haveKey) {
+                frame->key.assign(value.data(), value.size());
+                frame->haveKey = true;
+                return;
+            }
+        }
+        emit(Variant(std::string(value)));
+    }
+
+    void onVariant(const Variant& value) override { emit(value); }
+    void onExtension(const std::any& value) override { emit(Variant::fromValue(value)); }
+
+    void onListBegin(std::size_t size) override
+    {
+        Frame frame;
+        frame.items.reserve(size);
+        m_frames.push_back(std::move(frame));
+    }
+
+    void onListEnd() override
+    {
+        Frame frame = popFrame();
+        emit(Variant(std::move(frame.items)));
+    }
+
+    MapKeyForm onMapBegin(std::size_t size, bool keyConvertible) override
+    {
+        Frame frame;
+        frame.isMap = true;
+        frame.form = keyConvertible ? MapKeyForm::Text : MapKeyForm::Typed;
+        if (frame.form == MapKeyForm::Text)
+            frame.map.reserve(size);
+        else
+            frame.items.reserve(size);
+        m_frames.push_back(std::move(frame));
+        return m_frames.back().form;
+    }
+
+    void onMapEnd() override
+    {
+        Frame frame = popFrame();
+        if (frame.form == MapKeyForm::Text)
+            emit(Variant(std::move(frame.map)));
+        else
+            emit(Variant(std::move(frame.items)));
+    }
+
+    void onEntryBegin() override {}
+
+    void onEntryEnd() override
+    {
+        if (!m_frames.empty())
+            m_frames.back().foldTypedEntryIfNeeded();
+    }
+
+private:
+    struct Frame {
+        bool isMap = false;
+        MapKeyForm form = MapKeyForm::Text;
+        VariantList items;   ///< 序列元素，或 Typed 形态映射的待折叠条目
+        VariantMap map;      ///< Text 形态映射
+        std::string key;     ///< Text 形态映射的当前键
+        bool haveKey = false;
+
+        /// Typed 形态：一个条目恰好追加两个值（键、值；容器值闭合时也只追加一次）。
+        void foldTypedEntryIfNeeded()
+        {
+            if (!isMap || form != MapKeyForm::Typed || items.size() < 2)
+                return;
+            const std::size_t count = items.size();
+            VariantList pair;
+            pair.reserve(2);
+            pair.push_back(std::move(items[count - 2]));
+            pair.push_back(std::move(items[count - 1]));
+            items.resize(count - 2);
+            items.push_back(Variant(std::move(pair)));
+        }
+    };
+
+    Frame* textMapFrame()
+    {
+        if (m_frames.empty())
+            return nullptr;
+        Frame& frame = m_frames.back();
+        return (frame.isMap && frame.form == MapKeyForm::Text) ? &frame : nullptr;
+    }
+
+    Frame popFrame()
+    {
+        Frame frame = std::move(m_frames.back());
+        m_frames.pop_back();
+        return frame;
+    }
+
+    void emit(Variant value)
+    {
+        if (m_frames.empty()) {
+            m_root = std::move(value);
+            return;
+        }
+        Frame& frame = m_frames.back();
+        if (frame.isMap && frame.form == MapKeyForm::Text) {
+            frame.map[frame.key] = std::move(value);
+            frame.key.clear();
+            frame.haveKey = false;
+        } else {
+            frame.items.push_back(std::move(value));
+        }
+    }
+
+    std::vector<Frame> m_frames;
+    Variant m_root;
+};
+
+// ------------------------------------------------------------ 归一化
+
+/**
+ * @brief 递归归一化：把任意支持的容器变成只含内建类型的 Variant。
+ *
+ * 是 `visitValue` + `VariantSink` 的一行包装：
+ * - 序列容器 -> List（元素递归）；
+ * - 映射容器 -> 键可字符串化时是 Map（键写成十进制/文本），否则是 `[[k,v], ...]`；
+ * - `std::pair` -> 两元素 List；
+ * - 其他类型（叶子）-> `Variant::fromValue`，标量进热槽、其余进扩展槽。
+ * @param [in] T 容器或叶子值
+ * @return Variant 归一化结果
+ */
+template <class T>
+Variant normalizeToVariant(const T& value)
+{
+    VariantSink sink;
+    visitValue(value, sink);
+    return sink.take();
 }
 
 // ------------------------------------------------------------ 反归一化
@@ -332,13 +562,13 @@ bool denormalizeFromVariant(const Variant& value, T& out)
 template <class T>
 void installContainerAdapters()
 {
-    registerNormalizer(std::type_index(typeid(T)), [](const std::any& any) -> Variant {
+    registerNormalizer(std::type_index(typeid(T)), [](const std::any& any, ValueSink& sink) {
         const T* value = std::any_cast<T>(&any);
         if (!value) {
             throw VariantError(VariantErrorCode::TypeMismatch,
                                "normalizer: std::any does not hold the expected container type");
         }
-        return normalizeToVariant(*value);
+        visitValue(*value, sink);
     });
 
     // 用户先注册的 codec 优先；容器 codec 一律是 plain（JSON 写成普通数组/对象）。

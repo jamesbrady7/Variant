@@ -208,7 +208,9 @@ bool canConvertToPython(const vt::Variant& value)
         // 之后按普通结构递归检查即可。
         if (vt::detail::NormalizerFn normalizer = vt::detail::findNormalizer(any->type())) {
             try {
-                return canConvertToPython(normalizer(*any));
+                vt::detail::VariantSink sink;
+                normalizer(*any, sink);
+                return canConvertToPython(sink.take());
             } catch (...) {
                 return false;
             }
@@ -250,7 +252,9 @@ PyObject* toPython(const vt::Variant& value)
                 // 再按同一套规则递归转换。
                 if (vt::detail::NormalizerFn normalizer =
                         vt::detail::findNormalizer(any->type())) {
-                    return toPython(normalizer(*any));
+                    vt::detail::VariantSink sink;
+                    normalizer(*any, sink);
+                    return toPython(sink.take());
                 }
                 PyErr_Format(PyExc_TypeError,
                              "vt::Variant holds '%s' but no Python converter is registered "
