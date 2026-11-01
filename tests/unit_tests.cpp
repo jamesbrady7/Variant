@@ -562,6 +562,17 @@ void testNestedContainers()
     // 8) 归一化只用于转换，不改写存储：扩展槽里仍是原对象。
     CHECK(vt::detail::normalizeToVariant(grid).isList());
     CHECK_EQ(vt::detail::normalizeToVariant(grid).asList().size(), std::size_t(2));
+
+    // 9) vector<bool> 的元素是代理类型（_Bit_reference）：必须按 bool 事件发出，
+    //    不能当成"未知叶子"塞进扩展槽（那样 getAs / JSON 都会失败）。
+    using Bits = std::vector<bool>;
+    const Bits bits{true, false, true};
+    vt::Variant bitsVar = vt::Variant::fromValue(bits);
+    CHECK(vt::detail::normalizeToVariant(bits).isList());
+    CHECK_EQ(vt::detail::normalizeToVariant(bits).asList().size(), std::size_t(3));
+    auto bitsBack = vt::getAs<Bits>(bitsVar);
+    CHECK(bitsBack.has_value());
+    CHECK_EQ((*bitsBack)[2], true);
 }
 
 void testDocument()
