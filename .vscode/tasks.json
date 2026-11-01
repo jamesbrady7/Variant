@@ -1,0 +1,161 @@
+{
+    // ═══ 构建 / 运行任务（Ctrl+Shift+B 触发默认任务）═══
+    // 约定：
+    //   Release          —— 全量构建（含 shiboken 绑定），做性能测试用
+    //   RelWithDebInfo   —— 全量构建 + PDB，调试 Demo App 用（不是 Debug！）
+    //   Debug (core)     —— 只构建 core/tests/bench；Python 绑定在 Debug 下无法链接
+    "version": "2.0.0",
+    "tasks": [
+        {
+            // CMakeLists 大改后跑一次；VS 生成器自动探测 MSVC，无需 vcvars
+            "label": "CMake Configure",
+            "type": "shell",
+            "command": "D:/CMAKE/bin/cmake.exe",
+            "args": [
+                "-S", ".", "-B", "build",
+                "-G", "Visual Studio 16 2019", "-A", "x64"
+            ],
+            "problemMatcher": []
+        },
+        {
+            // 默认构建（Ctrl+Shift+B）：全量 Release（含 .pyd）
+            "label": "CMake Build Release",
+            "type": "shell",
+            "command": "D:/CMAKE/bin/cmake.exe",
+            "args": ["--build", "build", "--config", "Release"],
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$msCompile"]
+        },
+        {
+            // 带符号的全量构建：用来调试 variant_demo_app.exe
+            "label": "CMake Build RelWithDebInfo",
+            "type": "shell",
+            "command": "D:/CMAKE/bin/cmake.exe",
+            "args": ["--build", "build", "--config", "RelWithDebInfo"],
+            "problemMatcher": ["$msCompile"]
+        },
+        {
+            // Debug 只编 core / tests / bench（绕过 Python 绑定）
+            "label": "CMake Build Debug (core)",
+            "type": "shell",
+            "command": "D:/CMAKE/bin/cmake.exe",
+            "args": ["--build", "build", "--config", "Debug", "--target", "vt_tests", "vt_bench"],
+            "problemMatcher": ["$msCompile"]
+        },
+
+        // ── 直跑通道（Ctrl+F5 替代；PATH 里补 Qt bin）──────────────
+        {
+            "label": "Run: unit tests (Debug)",
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/Debug/vt_tests.exe",
+            "options": { "cwd": "${workspaceFolder}/build/bin/Debug" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "Run: unit tests (Release)",
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/Release/vt_tests.exe",
+            "options": { "cwd": "${workspaceFolder}/build/bin/Release" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "Run: serialization tests (Release)",
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/Release/vt_serial_tests.exe",
+            "options": { "cwd": "${workspaceFolder}/build/bin/Release" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            // Python 继承 C++ 多态类 + VariantMap 接收 shared_ptr + 释放验证（16 项断言）
+            "label": "Run: Python override demo (Release)",
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/Release/vt_plugin_override_test.exe",
+            "options": { "cwd": "${workspaceFolder}/build/bin/Release" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            // C++ runner 内嵌 Python，跑 py_scripts/shared_ownership_test.py（38 项断言）
+            "label": "Run: shared ownership tests (Release)",
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/Release/vt_shared_tests.exe",
+            "options": { "cwd": "${workspaceFolder}/build/bin/Release" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "Run: benchmark (Release)",
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/Release/vt_bench.exe",
+            "options": {
+                "cwd": "${workspaceFolder}/build/bin/Release",
+                "env": { "PATH": "D:\\Qt\\5.15.2\\msvc2019_64\\bin;${env:PATH}" }
+            },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "Run: demo app (RelWithDebInfo)",
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/RelWithDebInfo/variant_demo_app.exe",
+            "options": {
+                "cwd": "${workspaceFolder}/build/bin/RelWithDebInfo",
+                "env": { "PYTHONIOENCODING": "utf-8" }
+            },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            // 不经过 C++ runner，直接用 Python 跑（演示 pyd 可独立使用）
+            "label": "Run: Python demo",
+            "type": "process",
+            "command": "C:/Users/Zz/AppData/Local/Programs/Python/Python39/python.exe",
+            "args": ["${workspaceFolder}/py_scripts/demo.py"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": { "PYTHONIOENCODING": "utf-8" }
+            },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+
+        // ── 组合任务 ──────────────────────────────────────────────
+        {
+            "label": "Build & Run: demo app",
+            "dependsOrder": "sequence",
+            "dependsOn": ["CMake Build RelWithDebInfo"],
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/RelWithDebInfo/variant_demo_app.exe",
+            "options": {
+                "cwd": "${workspaceFolder}/build/bin/RelWithDebInfo",
+                "env": { "PYTHONIOENCODING": "utf-8" }
+            },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "Build & Run: unit tests",
+            "dependsOrder": "sequence",
+            "dependsOn": ["CMake Build Debug (core)"],
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/Debug/vt_tests.exe",
+            "options": { "cwd": "${workspaceFolder}/build/bin/Debug" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            // 共享所有权只能在 Release 下构建（Python 绑定不支持 Debug）
+            "label": "Build & Run: shared ownership tests",
+            "dependsOrder": "sequence",
+            "dependsOn": ["CMake Build Release"],
+            "type": "process",
+            "command": "${workspaceFolder}/build/bin/Release/vt_shared_tests.exe",
+            "options": { "cwd": "${workspaceFolder}/build/bin/Release" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        }
+    ]
+}

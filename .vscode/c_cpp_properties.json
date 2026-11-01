@@ -1,0 +1,30 @@
+{
+    // 兜底 IntelliSense 配置。首选仍是 CMake Tools（settings.json 里已配置），
+    // CMake 尚未 configure 时靠这里的 includePath 也能补全。
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/lib/include",
+                "${workspaceFolder}/demo",
+                "${workspaceFolder}/binding/src",
+                "C:/Users/Zz/AppData/Local/Programs/Python/Python39/include",
+                "C:/Users/Zz/AppData/Local/Programs/Python/Python39/Lib/site-packages/shiboken6/include",
+                "D:/Qt/5.15.2/msvc2019_64/include",
+                "D:/Qt/5.15.2/msvc2019_64/include/QtCore"
+            ],
+            "defines": [
+                "WIN32",
+                "_WINDOWS",
+                "UNICODE",
+                "_UNICODE"
+            ],
+            "windowsSdkVersion": "10.0.19041.0",
+            "compilerPath": "D:/VS2019/VS IDE/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64/cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-msvc-x64"
+        }
+    ],
+    "version": 4
+}

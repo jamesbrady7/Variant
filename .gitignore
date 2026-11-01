@@ -1,0 +1,6 @@
+build/
+.vs/
+*.user
+vt_serial_*.json
+vt_serial_test*.json
+vt_should_not_exist.json

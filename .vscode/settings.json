@@ -1,0 +1,37 @@
+{
+    // ── CMake Tools ────────────────────────────────────────────────
+    // 本机 cmake 不在 PATH，显式给出（见知识库）
+    "cmake.cmakePath": "D:/CMAKE/bin/cmake.exe",
+    "cmake.generator": "Visual Studio 16 2019",
+    "cmake.platform": "x64",
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.configureOnOpen": true,
+    // 默认构建配置。注意：Python 绑定只能在非 Debug 配置下构建/链接
+    // （官方 Python 无 python39_d.lib，Debug 的 _DEBUG 会启用 Py_DEBUG）。
+    "cmake.buildType": "Release",
+
+    // IntelliSense 由 CMake Tools 提供；c_cpp_properties.json 兜底
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+
+    "files.encoding": "utf8",
+    "files.associations": {
+        "*.h": "cpp",
+        "*.cpp": "cpp",
+        "*.pyi": "python"
+    },
+
+    // ── Python ────────────────────────────────────────────────────
+    "python.defaultInterpreterPath": "C:/Users/Zz/AppData/Local/Programs/Python/Python39/python.exe",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/py_scripts"
+    ],
+
+    // ── 杂项 ──────────────────────────────────────────────────────
+    "search.exclude": {
+        "**/build": true,
+        "**/__pycache__": true
+    },
+    "files.watcherExclude": {
+        "**/build/**": true
+    }
+}

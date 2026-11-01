@@ -1,0 +1,103 @@
+{
+    // ═══ F5 调试配置 ═══
+    // 产物路径：RUNTIME_OUTPUT_DIRECTORY=build/bin，多配置再垫一层 → build/bin/<Config>
+    //
+    // 配置选择建议：
+    //   - 只调 core / 路径 / COW       → Debug（vt_tests）
+    //   - 想连 C++ 一起调 Python 往返 → RelWithDebInfo（有 PDB，且绑定可链接）
+    //   - 只调 Python 脚本           → "Python: demo.py"（需要 ms-python 扩展）
+    "version": "0.2.0",
+    "configurations": [
+        {
+            // 断点推荐：Variant::create（路径建节点）/ create 里的 detach 分支 /
+            //           VariantPath::parse（语法错误路径）/ VariantDocument::set
+            "name": "调试 vt_tests (Debug)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/bin/Debug/vt_tests.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/build/bin/Debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake Build Debug (core)"
+        },
+        {
+            // C++ runner 内嵌 Python：断点可以打在 C++ 侧（转换函数 / 注册表），
+            // 也可以看到 Python 脚本的 print 输出。
+            // 断点推荐：vpy::toPython / vpy::fromPython / vpy::findHookForObject
+            "name": "调试 demo app (C++ + Python, RelWithDebInfo)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/bin/RelWithDebInfo/variant_demo_app.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/build/bin/RelWithDebInfo",
+            "environment": [
+                { "name": "PYTHONIOENCODING", "value": "utf-8" }
+            ],
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake Build RelWithDebInfo"
+        },
+        {
+            // Python 继承 C++ 多态类 + VariantMap/shared_ptr + 释放验证。
+            // Ctrl+F5 直接运行；F5 可调试（预启动任务会先构建 Release）。
+            // 断点推荐：PluginBaseWrapper::compute / describe（生成的转发代码）、
+            //           vpy::detail::sharedStore（收养）、PythonKeepAliveDeleter::release
+            "name": "运行 Python override demo (Release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/bin/Release/vt_plugin_override_test.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/build/bin/Release",
+            "environment": [
+                { "name": "PYTHONIOENCODING", "value": "utf-8" }
+            ],
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake Build Release"
+        },
+        {
+            // 共享所有权测试：C++ runner 内嵌 Python 跑 py_scripts/shared_ownership_test.py
+            // 断点推荐：vpy::detail::sharedToPython / sharedStore /
+            //           PythonKeepAliveDeleter::release / sharedCapsuleDestructor
+            "name": "调试 shared ownership (C++ + Python, RelWithDebInfo)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/bin/RelWithDebInfo/vt_shared_tests.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/build/bin/RelWithDebInfo",
+            "environment": [
+                { "name": "PYTHONIOENCODING", "value": "utf-8" }
+            ],
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake Build RelWithDebInfo"
+        },
+        {
+            // 需要 Qt5 DLL
+            "name": "调试 benchmark (Release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/bin/Release/vt_bench.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/build/bin/Release",
+            "environment": [
+                { "name": "PATH", "value": "D:\\Qt\\5.15.2\\msvc2019_64\\bin;${env:PATH}" }
+            ],
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake Build Release"
+        },
+        {
+            // 纯 Python 侧调试：直接 import 编译好的 .pyd
+            "name": "Python: demo.py",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/py_scripts/demo.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "env": { "PYTHONIOENCODING": "utf-8" },
+            "preLaunchTask": "CMake Build Release"
+        }
+    ]
+}

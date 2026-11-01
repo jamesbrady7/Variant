@@ -1,0 +1,131 @@
+<?xml version="1.0"?>
+<typesystem package="variant_binding">
+
+    <!-- 说明（实证结论）：
+         shiboken6 的 Python 签名解析器不认识命名空间类型 "vt.Variant"，
+         任何参数类型不匹配都会走到错误处理并 fatal。因此这里不把 Variant
+         声明成 primitive-type，所有跨语言值一律用 PyObject 直通，
+         由 variant_python.cpp 在 C++ 侧完成递归转换。 -->
+
+    <!-- Python 侧文档门面：get/set 的 value 走 PyObject 直通 -->
+    <object-type name="PyDocument"/>
+
+    <!-- 跨语言读写：签名用 PyObject 直通，C++ 侧手工转换。
+         不用成员方法是因为 shiboken 的自动绑定不支持 PyObject* 形参/返回。 -->
+    <add-function signature="pyDocGet(const PyDocument*, const std::string&amp;)">
+        <inject-code class="target" position="beginning">
+            return pyDocGet(cppArg0, cppArg1);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="pyDocSet(PyDocument*, const std::string&amp;, PyObject)">
+        <inject-code class="target" position="beginning">
+            PyObject *pyResult{};
+            bool cppResult = pyDocSet(cppArg0, cppArg1, %PYARG_3);
+            pyResult = Shiboken::Conversions::copyToPython(
+                Shiboken::Conversions::PrimitiveTypeConverter&lt;bool&gt;(), &amp;cppResult);
+            return pyResult;
+        </inject-code>
+    </add-function>
+
+    <!-- ====== 全局函数 ====== -->
+
+    <add-function signature="initTypes()">
+        <inject-code class="target" position="beginning">
+            PyObject *pyResult{};
+            bool cppResult = vpy::registerDemoTypes();
+            pyResult = Shiboken::Conversions::copyToPython(
+                Shiboken::Conversions::PrimitiveTypeConverter&lt;bool&gt;(), &amp;cppResult);
+            return pyResult;
+        </inject-code>
+    </add-function>
+
+    <add-function signature="makeSample()">
+        <inject-code class="target" position="beginning">
+            return vpy::toPython(makeSample());
+        </inject-code>
+    </add-function>
+
+    <add-function signature="canConvertToPython(PyObject)">
+        <inject-code class="target" position="beginning">
+            vt::Variant value;
+            if (!vpy::fromPython(%1, value)) {
+                PyErr_Clear();
+                return PyBool_FromLong(0);
+            }
+            return PyBool_FromLong(vpy::canConvertToPython(value) ? 1 : 0);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="makeBuiltinSample()">
+        <inject-code class="target" position="beginning">
+            return vpy::toPython(makeBuiltinSample());
+        </inject-code>
+    </add-function>
+
+    <add-function signature="sumInts(PyObject)">
+        <inject-code class="target" position="beginning">
+            const int cppResult = sumInts(%1);
+            if (PyErr_Occurred())
+                return nullptr;
+            return PyLong_FromLong(cppResult);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="intMapSize(PyObject)">
+        <inject-code class="target" position="beginning">
+            const int cppResult = intMapSize(%1);
+            if (PyErr_Occurred())
+                return nullptr;
+            return PyLong_FromLong(cppResult);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="pyMakeSharedNode(int, const std::string&amp;)">
+        <inject-code class="target" position="beginning">
+            return pyMakeSharedNode(cppArg0, cppArg1);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="pyBorrowSharedNode(int, const std::string&amp;)">
+        <inject-code class="target" position="beginning">
+            return pyBorrowSharedNode(cppArg0, cppArg1);
+        </inject-code>
+    </add-function>
+
+
+
+    <add-function signature="pyEcho(PyObject)">
+        <inject-code class="target" position="beginning">
+            vt::Variant input;
+            if (!vpy::fromPython(%1, input))
+                return nullptr;
+            return vpy::toPython(echo(input));
+        </inject-code>
+    </add-function>
+
+    <add-function signature="pyDescribe(PyObject)">
+        <inject-code class="target" position="beginning">
+            vt::Variant input;
+            if (!vpy::fromPython(%1, input))
+                return nullptr;
+            const std::string text = describeValue(input);
+            return PyUnicode_DecodeUTF8(text.data(),
+                                        static_cast&lt;Py_ssize_t&gt;(text.size()), "strict");
+        </inject-code>
+    </add-function>
+
+    <!-- 注册类型的演示：object-type 保持对象身份，value-type 按值拷贝 -->
+    <object-type name="DemoNode"/>
+    <object-type name="SharedNode"/>
+    <value-type name="DemoColor"/>
+
+    <!-- 多态基类：Python 可继承并重写 compute()/describe()，
+         shiboken 为多态类生成 wrapper，C++ 侧虚调用会转发到 Python。 -->
+    <object-type name="PluginBase"/>
+
+    <!-- 虚函数 evaluate() 的输入/输出：值类型，Python <-> C++ 按值拷贝往返。 -->
+    <value-type name="PluginRequest"/>
+    <value-type name="PluginResult"/>
+
+</typesystem>
