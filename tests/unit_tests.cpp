@@ -573,6 +573,12 @@ void testNestedContainers()
     auto bitsBack = vt::getAs<Bits>(bitsVar);
     CHECK(bitsBack.has_value());
     CHECK_EQ((*bitsBack)[2], true);
+
+    // 10) 无符号越界与 `Variant` 的整型构造同规则：不静默回绕。
+    using BigUnsigned = std::vector<unsigned long long>;
+    const BigUnsigned tooBig{std::numeric_limits<unsigned long long>::max()};
+    CHECK(throwsCode([&] { (void)vt::detail::normalizeToVariant(tooBig); },
+                     vt::VariantErrorCode::OutOfRange));
 }
 
 void testDocument()

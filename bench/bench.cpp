@@ -8,7 +8,9 @@
 #include <QStringList>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -277,6 +279,152 @@ void benchNestedPath()
         0.0);
 }
 
+// ------------------------------------------------------------ 值遍历
+
+/// @brief 手写等价基线：直接构建 List（改造前 normalizeToVariant 的做法）。
+vt::Variant directVectorInt(const std::vector<int>& values)
+{
+    vt::VariantList list;
+    list.reserve(values.size());
+    for (int value : values)
+        list.push_back(vt::Variant(value));
+    return vt::Variant(std::move(list));
+}
+
+/// @brief 手写等价基线：嵌套 vector<vector<int>>。
+vt::Variant directNestedInt(const std::vector<std::vector<int>>& outer)
+{
+    vt::VariantList list;
+    list.reserve(outer.size());
+    for (const auto& inner : outer) {
+        vt::VariantList items;
+        items.reserve(inner.size());
+        for (int value : inner)
+            items.push_back(vt::Variant(value));
+        list.push_back(vt::Variant(std::move(items)));
+    }
+    return vt::Variant(std::move(list));
+}
+
+/// @brief 手写等价基线：map<string,int> -> Map（键原样）。
+vt::Variant directStringMap(const std::map<std::string, int>& values)
+{
+    vt::VariantMap map;
+    map.reserve(values.size());
+    for (const auto& kv : values)
+        map[kv.first] = vt::Variant(kv.second);
+    return vt::Variant(std::move(map));
+}
+
+/// @brief 手写等价基线：map<int,int> -> Map（键写十进制文本）。
+vt::Variant directIntMap(const std::map<int, int>& values)
+{
+    vt::VariantMap map;
+    map.reserve(values.size());
+    for (const auto& kv : values)
+        map[std::to_string(kv.first)] = vt::Variant(kv.second);
+    return vt::Variant(std::move(map));
+}
+
+void scanVariant(const vt::Variant& value)
+{
+    g_sink += static_cast<std::int64_t>(value.isList() ? value.asList().size()
+                                                       : value.asMap().size());
+}
+
+void benchNormalize()
+{
+    std::printf("\n== value traversal: visitValue + VariantSink vs hand-written loop ==\n");
+    std::printf("%-40s %12s %12s %12s\n", "scenario", "visit(ms)", "direct(ms)", "visit/direct");
+    std::printf("  （direct = 改造前 normalizeToVariant 的写法；visit 走事件流，"
+                "VariantSink 已模板化内联）\n");
+
+    // 1) vector<int>：叶子最密，最能看出每元素一次虚调用的代价。
+    {
+        const std::vector<int> values = [] {
+            std::vector<int> v;
+            v.reserve(200'000);
+            for (int i = 0; i < 200'000; ++i)
+                v.push_back(i);
+            return v;
+        }();
+        const std::size_t reps = 10;
+        const double visitMs = msPerOp(reps, [&](std::size_t n) {
+            for (std::size_t i = 0; i < n; ++i)
+                scanVariant(vt::detail::normalizeToVariant(values));
+        });
+        const double directMs = msPerOp(reps, [&](std::size_t n) {
+            for (std::size_t i = 0; i < n; ++i)
+                scanVariant(directVectorInt(values));
+        });
+        std::printf("%-40s %12.2f %12.2f %11.2fx\n", "vector<int> 200k",
+                    visitMs, directMs, directMs > 0 ? visitMs / directMs : 0.0);
+    }
+
+    // 2) 嵌套：每次进入内层容器多两次事件。
+    {
+        std::vector<std::vector<int>> outer;
+        outer.reserve(1'000);
+        for (int i = 0; i < 1'000; ++i) {
+            std::vector<int> inner;
+            inner.reserve(100);
+            for (int j = 0; j < 100; ++j)
+                inner.push_back(j);
+            outer.push_back(std::move(inner));
+        }
+        const std::size_t reps = 10;
+        const double visitMs = msPerOp(reps, [&](std::size_t n) {
+            for (std::size_t i = 0; i < n; ++i)
+                scanVariant(vt::detail::normalizeToVariant(outer));
+        });
+        const double directMs = msPerOp(reps, [&](std::size_t n) {
+            for (std::size_t i = 0; i < n; ++i)
+                scanVariant(directNestedInt(outer));
+        });
+        std::printf("%-40s %12.2f %12.2f %11.2fx\n", "vector<vector<int>> 1k x 100",
+                    visitMs, directMs, directMs > 0 ? visitMs / directMs : 0.0);
+    }
+
+    // 3) map<string,int>：Key 事件 + 条目事件。
+    {
+        std::map<std::string, int> values;
+        for (int i = 0; i < 20'000; ++i)
+            values.emplace("key_" + std::to_string(i), i);
+        const std::size_t reps = 20;
+        const double visitMs = msPerOp(reps, [&](std::size_t n) {
+            for (std::size_t i = 0; i < n; ++i)
+                scanVariant(vt::detail::normalizeToVariant(values));
+        });
+        const double directMs = msPerOp(reps, [&](std::size_t n) {
+            for (std::size_t i = 0; i < n; ++i)
+                scanVariant(directStringMap(values));
+        });
+        std::printf("%-40s %12.2f %12.2f %11.2fx\n", "map<string,int> 20k",
+                    visitMs, directMs, directMs > 0 ? visitMs / directMs : 0.0);
+    }
+
+    // 4) map<int,int>：多一步 toKey（十进制文本），衡量键字符串化的成本。
+    {
+        std::map<int, int> values;
+        for (int i = 0; i < 20'000; ++i)
+            values.emplace(i, i);
+        const std::size_t reps = 20;
+        const double visitMs = msPerOp(reps, [&](std::size_t n) {
+            for (std::size_t i = 0; i < n; ++i)
+                scanVariant(vt::detail::normalizeToVariant(values));
+        });
+        const double directMs = msPerOp(reps, [&](std::size_t n) {
+            for (std::size_t i = 0; i < n; ++i)
+                scanVariant(directIntMap(values));
+        });
+        std::printf("%-40s %12.2f %12.2f %11.2fx\n", "map<int,int> 20k (text keys)",
+                    visitMs, directMs, directMs > 0 ? visitMs / directMs : 0.0);
+    }
+
+    std::printf("  note: Python 侧（PySink）不在此基准内；它省掉中间 VariantList，\n");
+    std::printf("        100 万 int 少约 40 MB 的临时 Variant，但没有单独测量。\n");
+}
+
 void benchDetach()
 {
     section("copy + mutate one key (COW detach), 1k-key map");
@@ -321,6 +469,7 @@ int main()
     benchMapBuild();
     benchMapLookup();
     benchNestedPath();
+    benchNormalize();
     benchDetach();
 
     std::printf("\nsink=%lld\n", static_cast<long long>(g_sink));
