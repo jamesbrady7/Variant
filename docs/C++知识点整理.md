@@ -328,9 +328,15 @@ benchmark 初版在 500 万次只读里用了非 const 的 `asMap().size()`，
 
 ### 6.4 shiboken 的三条硬限制
 
-详见 [设计说明 第 5 章](设计说明.md)：typesystem 不接受 `ns::Class`、
-命名空间 primitive-type 进入 Python 签名后会 fatal、自动绑定方法不支持
-`PyObject*` 形参/返回值。本项目因此使用 `PyObject` 直通 + C++ 手工递归转换。
+详见 [设计说明 第 5 章](设计说明.md)：
+
+1. typesystem 不接受**绑定类**的 `ns::Class`（GD60709C2）；`<primitive-type>`
+   是转换条目不是绑定类，条目名可以带命名空间（本项目即 `vt::Variant`）；
+2. 命名空间 primitive-type 的参数不匹配会 fatal —— 给 target-to-native 加
+   `check="true"` 兜底分支即可变成普通 `TypeError`；
+3. 自动绑定方法不支持 `PyObject*` 形参/返回值 → 用 add-function + inject-code。
+
+本项目最终使用**真实签名 + primitive-type 转换**，不再有 `PyObject` 门面。
 
 ### 6.5 密集数值：一个 Variant 装一个数组
 
