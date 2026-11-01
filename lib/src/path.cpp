@@ -83,7 +83,12 @@ Path Path::parse(std::string_view text)
                     if (c == '\\') {
                         if (i + 1 >= n)
                             fail("dangling escape", i);
-                        key.push_back(text[i + 1]);
+                        // 只承认文档承诺的两种转义；\n 之类不悄悄吃掉反斜杠，
+                        // 否则 "a\nb" 会静默变成 "anb"。
+                        const char escaped = text[i + 1];
+                        if (escaped != '"' && escaped != '\\')
+                            fail("invalid escape sequence", i);
+                        key.push_back(escaped);
                         i += 2;
                     } else if (c == '"') {
                         ++i;
@@ -154,7 +159,7 @@ Path Path::parse(std::string_view text)
     return path;
 }
 
-bool Path::tryParse(std::string_view text, Path& out, std::string* error) noexcept
+bool Path::tryParse(std::string_view text, Path& out, std::string* error)
 {
     try {
         out = parse(text);

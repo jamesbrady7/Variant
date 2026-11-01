@@ -387,6 +387,41 @@ void testCow()
     CHECK_EQ(constRef["k"].asInt(), 1);
 }
 
+void testCowAt()
+{
+    // 非 const at() 必须和 operator[] 一样 detach：否则改副本会写穿到原值。
+    vt::Variant original = vt::VariantMap{
+        {"k", 1},
+        {"nested", vt::VariantMap{{"x", 10}}},
+    };
+    vt::Variant copy = original;
+
+    copy.at("k") = 2;
+    copy.at("nested.x"_path) = 20;   // 逐层共享 -> 必须逐层 detach
+
+    const vt::Variant& ro = original;
+    CHECK_EQ(ro.at("k").asInt(), 1);
+    CHECK_EQ(ro.at("nested.x"_path).asInt(), 10);
+    CHECK_EQ(copy.at("k").asInt(), 2);
+    CHECK_EQ(copy.at("nested.x"_path).asInt(), 20);
+
+    // list 的下标重载同理
+    vt::Variant list = vt::VariantList{1, 2};
+    vt::Variant listCopy = list;
+    listCopy.at(0) = 9;
+    const vt::Variant& rl = list;
+    CHECK_EQ(rl.at(0).asInt(), 1);
+    CHECK_EQ(listCopy.at(0).asInt(), 9);
+
+    // 可写版本的错误码与 const 版本一致
+    vt::Variant wrong = vt::VariantMap{{"k", 1}};
+    CHECK(throwsCode([&] { (void)wrong.at("missing"_path); },
+                     vt::VariantErrorCode::KeyNotFound));
+    CHECK(throwsCode([&] { (void)wrong.at("k.x"_path); }, vt::VariantErrorCode::NotAMap));
+    CHECK(throwsCode([&] { (void)wrong.at("k[0]"_path); }, vt::VariantErrorCode::NotAList));
+    CHECK(throwsCode([&] { (void)wrong.at(0); }, vt::VariantErrorCode::NotAList));
+}
+
 void testVectorPayload()
 {
     // 密集数值的正确形态：一个 Variant 装一个数组，而不是每个元素一个 Variant。
@@ -605,6 +640,54 @@ void testDocument()
     CHECK(doc.lastError().empty());
 }
 
+void testExtensionEquality()
+{
+    // 紧凑容器自动登记了 codec：按内容比较，而不是"只比类型"。
+    const vt::Variant a = vt::Variant::fromValue(std::vector<int>{1, 2, 3});
+    const vt::Variant b = vt::Variant::fromValue(std::vector<int>{1, 2, 3});
+    const vt::Variant c = vt::Variant::fromValue(std::vector<int>{1, 2, 4});
+    CHECK(a == b);
+    CHECK(a != c);
+
+    // map 的键/值同样参与比较
+    const vt::Variant m1 = vt::Variant::fromValue(std::map<int, std::string>{{1, "a"}, {2, "b"}});
+    const vt::Variant m2 = vt::Variant::fromValue(std::map<int, std::string>{{1, "a"}, {2, "b"}});
+    const vt::Variant m3 = vt::Variant::fromValue(std::map<int, std::string>{{1, "a"}, {2, "c"}});
+    CHECK(m1 == m2);
+    CHECK(m1 != m3);
+
+    // 嵌套容器递归比较
+    const vt::Variant n1 = vt::Variant::fromValue(std::vector<std::vector<int>>{{1}, {2, 3}});
+    const vt::Variant n2 = vt::Variant::fromValue(std::vector<std::vector<int>>{{1}, {2, 4}});
+    CHECK(n1 != n2);
+    CHECK(n1 == vt::Variant::fromValue(std::vector<std::vector<int>>{{1}, {2, 3}}));
+
+    // 槽类型不同（List vs Extension）仍然不等，即使内容一样
+    CHECK(vt::Variant(vt::VariantList{1, 2, 3}) != a);
+
+    // 没有 codec 的自定义类型保留旧约定：只比较动态类型
+    struct NoCodec {
+        int v = 0;
+    };
+    const vt::Variant raw1 = vt::Variant::fromValue(NoCodec{1});
+    const vt::Variant raw2 = vt::Variant::fromValue(NoCodec{2});
+    CHECK(raw1 == raw2);
+    CHECK(raw1 != vt::Variant::fromValue(Probe{1, "p"}));
+
+    // codec 抛错时同样退化为类型比较，至少保证自反性（v == v）。
+    struct BrokenCodec {
+        int v = 0;
+    };
+    vt::registerValueCodec<BrokenCodec>(
+        "unit-test::BrokenCodec",
+        [](const BrokenCodec&) -> vt::Variant { throw std::runtime_error("broken codec"); },
+        [](const vt::Variant&, BrokenCodec&) { return false; });
+    const vt::Variant broken1 = vt::Variant::fromValue(BrokenCodec{1});
+    const vt::Variant broken2 = vt::Variant::fromValue(BrokenCodec{2});
+    CHECK(broken1 == broken1);
+    CHECK(broken1 == broken2);
+}
+
 void testEqualityAndDescribe()
 {
     vt::Variant a = vt::VariantMap{{"x", 1}, {"y", vt::VariantList{true, "s"}}};
@@ -634,6 +717,40 @@ void testPathRoundTrip()
         const vt::Path again = vt::Path::parse(path.toString());
         CHECK_EQ(again.segments().size(), path.segments().size());
     }
+}
+
+void testPathEscapes()
+{
+    // 只承诺 \" 与 \\；未知转义必须报错，不能把反斜杠悄悄吞掉。
+    // 注意：带 \" 的原始字符串先赋给局部变量再进 CHECK ——
+    // MSVC 在宏参数里对原始字符串做 # 字符串化时会误报非法转义。
+    const char* invalidEscape = R"(["a\nb"])";
+    const char* quotedKey = R"(["a\"b"])";
+
+    vt::Path parsed;
+    std::string error;
+    CHECK(!vt::Path::tryParse(invalidEscape, parsed, &error));
+    CHECK(!error.empty());
+    CHECK(vt::Path::tryParse(quotedKey, parsed, &error));
+
+    // 转义键的 toString 往返
+    const vt::Path path = vt::Path::parse(R"(["a\"b"]["c\\d"])");
+    CHECK_EQ(path.segments().size(), std::size_t(2));
+    CHECK_EQ(path.segments()[0].key, std::string("a\"b"));
+    CHECK_EQ(path.segments()[1].key, std::string("c\\d"));
+
+    const vt::Path again = vt::Path::parse(path.toString());
+    CHECK_EQ(again.segments().size(), path.segments().size());
+    CHECK_EQ(again.segments()[0].key, path.segments()[0].key);
+    CHECK_EQ(again.segments()[1].key, path.segments()[1].key);
+
+    // 取值/写入走同一条解析路径
+    vt::Variant v;
+    v[R"(["a\"b"]["c\\d"])"_path] = 7;
+    CHECK_EQ(v.at(path).asInt(), 7);
+    const vt::Variant* found = v.find(R"(["a\"b"]["c\\d"])"_path);
+    CHECK(found != nullptr);
+    CHECK_EQ(found ? found->asInt() : -1, 7);
 }
 
 /// 记录事件流的测试用 Sink：验证"编译器算出来的键形态"确实交给了 sink。
@@ -740,6 +857,7 @@ int main()
     RUN(testPathOnList);
     RUN(testPathErrors);
     RUN(testCow);
+    RUN(testCowAt);
     RUN(testVectorPayload);
     RUN(testSharedPointerStorage);
     RUN(testExtension);
@@ -747,7 +865,9 @@ int main()
     RUN(testValueSink);
     RUN(testDocument);
     RUN(testEqualityAndDescribe);
+    RUN(testExtensionEquality);
     RUN(testPathRoundTrip);
+    RUN(testPathEscapes);
 #undef RUN
 
     std::printf("\n%d checks, %d failure(s)\n", g_checks, g_failures);

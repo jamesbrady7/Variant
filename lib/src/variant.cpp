@@ -1,10 +1,12 @@
 #include "vt/variant.h"
 
+#include "vt/codec.h"
 #include "vt/type_registry.h"
 #include "vt/variant_list.h"
 #include "vt/variant_map.h"
 
 #include <algorithm>
+#include <typeindex>
 #include <utility>
 
 namespace vt {
@@ -68,6 +70,44 @@ const char* builtinTypeName(Variant::Type t) noexcept
     case Variant::Type::Extension: return "extension";
     }
     return "unknown";
+}
+
+/// 扩展值比较的递归深度（防"编码结果里又包含同一类型"的 codec 自引用）。
+thread_local int g_extensionCompareDepth = 0;
+
+/**
+ * @brief 比较两个扩展槽。
+ *
+ * 同一动态类型时：注册过 codec 就按 codec 编码出的普通 Variant 递归比较
+ * （因此 `vector<int>` 等紧凑容器是内容比较）；没有 codec 则退化为只比较
+ * 动态类型——`std::any` 没有通用相等语义，这是有意保留的旧约定。
+ */
+bool extensionEquals(const std::any& a, const std::any& b)
+{
+    if (a.type() != b.type())
+        return false;
+
+    const CodecRegistry::Entry* codec =
+        CodecRegistry::instance().find(std::type_index(a.type()));
+    if (!codec || !codec->encode)
+        return true;   // 无 codec：只保证类型相同
+
+    if (g_extensionCompareDepth >= 64)
+        return true;   // 自引用型 codec：截断为类型比较，避免无限递归
+    ++g_extensionCompareDepth;
+    struct DepthGuard {
+        ~DepthGuard() { --g_extensionCompareDepth; }
+    } guard;
+
+    try {
+        const Variant left = codec->encode(a);
+        const Variant right = codec->encode(b);
+        return left == right;   // 递归回到 Variant::operator==
+    } catch (...) {
+        // codec 编不出来 = 这个值没有可比较的普通表示：退化为类型比较，
+        // 与"未注册 codec"同一约定。返回 false 会破坏自反性（v == v 变假）。
+        return true;
+    }
 }
 
 } // namespace
@@ -148,7 +188,7 @@ const std::type_info& Variant::extensionType() const noexcept
     return std::get<std::shared_ptr<VariantExt>>(m_storage)->value.type();
 }
 
-std::any* Variant::extensionAny() noexcept
+std::any* Variant::extensionAny()
 {
     auto* ptr = std::get_if<std::shared_ptr<VariantExt>>(&m_storage);
     if (!ptr || !*ptr)
@@ -307,17 +347,17 @@ const Variant* Variant::find(const std::string& key) const noexcept
     return ptr->find(key);
 }
 
-const Variant* Variant::find(std::string_view key) const noexcept
+const Variant* Variant::find(std::string_view key) const
 {
     return find(std::string(key));
 }
 
-const Variant* Variant::find(const char* key) const noexcept
+const Variant* Variant::find(const char* key) const
 {
     return find(std::string_view(key ? key : ""));
 }
 
-bool Variant::contains(std::string_view key) const noexcept
+bool Variant::contains(std::string_view key) const
 {
     return find(key) != nullptr;
 }
@@ -382,17 +422,64 @@ const Variant& Variant::at(std::size_t index) const
 
 Variant& Variant::at(const Path& path)
 {
-    return const_cast<Variant&>(static_cast<const Variant&>(*this).at(path));
+    // 可写入口必须逐层 detach：const 版本只读，直接 const_cast 会把写入
+    // 落到与副本共享的容器里，破坏写时复制（改副本会污染原值）。
+    Variant* cur = this;
+    for (std::size_t i = 0; i < path.segments().size(); ++i) {
+        const Path::Segment& seg = path.segments()[i];
+        if (seg.isIndex) {
+            if (!cur->isList()) {
+                throw VariantError(VariantErrorCode::NotAList,
+                                   std::string("segment ") + std::to_string(i) + ": expected list, got " +
+                                       cur->typeName(),
+                                   path.source(), i, seg.offset);
+            }
+            VariantList& list = cur->asList();   // 共享时在这里 detach
+            if (seg.index >= list.size()) {
+                throw VariantError(VariantErrorCode::IndexOutOfBounds,
+                                   "segment " + std::to_string(i) + ": index " +
+                                       std::to_string(seg.index) + " out of range [0," +
+                                       std::to_string(list.size()) + ")",
+                                   path.source(), i, seg.offset);
+            }
+            cur = &list[seg.index];
+        } else {
+            if (!cur->isMap()) {
+                throw VariantError(VariantErrorCode::NotAMap,
+                                   std::string("segment ") + std::to_string(i) + ": expected map, got " +
+                                       cur->typeName(),
+                                   path.source(), i, seg.offset);
+            }
+            VariantMap& map = cur->asMap();   // 共享时在这里 detach
+            Variant* next = map.find(seg.key);
+            if (!next) {
+                throw VariantError(VariantErrorCode::KeyNotFound,
+                                   "segment " + std::to_string(i) + ": key \"" + seg.key + "\" not found",
+                                   path.source(), i, seg.offset);
+            }
+            cur = next;
+        }
+    }
+    return *cur;
 }
 
 Variant& Variant::at(std::string_view key)
 {
-    return const_cast<Variant&>(static_cast<const Variant&>(*this).at(key));
+    // 先查类型、再 detach：失败路径不付出深拷贝。
+    if (!isMap()) {
+        throw VariantError(VariantErrorCode::NotAMap,
+                           std::string("expected map, got ") + typeName());
+    }
+    return asMap().at(key);
 }
 
 Variant& Variant::at(std::size_t index)
 {
-    return const_cast<Variant&>(static_cast<const Variant&>(*this).at(index));
+    if (!isList()) {
+        throw VariantError(VariantErrorCode::NotAList,
+                           std::string("expected list, got ") + typeName());
+    }
+    return asList().at(index);
 }
 
 Variant& Variant::create(const Path& path)
@@ -535,8 +622,7 @@ bool Variant::operator==(const Variant& other) const
     case Type::Extension: {
         const std::any* a = extensionAny();
         const std::any* b = other.extensionAny();
-        // std::any 没有通用相等语义：只比较动态类型。
-        return a && b && a->type() == b->type();
+        return a && b && extensionEquals(*a, *b);
     }
     }
     return false;

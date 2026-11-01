@@ -32,7 +32,7 @@ Variant VariantMap::operator[](std::string_view key) const
     return Variant();
 }
 
-const Variant* VariantMap::find(std::string_view key) const noexcept
+const Variant* VariantMap::find(std::string_view key) const
 {
     return find(std::string(key));
 }
@@ -43,12 +43,12 @@ const Variant* VariantMap::find(const std::string& key) const noexcept
     return it == m_data.end() ? nullptr : &it->second;
 }
 
-const Variant* VariantMap::find(const char* key) const noexcept
+const Variant* VariantMap::find(const char* key) const
 {
     return find(std::string_view(key ? key : ""));
 }
 
-Variant* VariantMap::find(std::string_view key) noexcept
+Variant* VariantMap::find(std::string_view key)
 {
     return const_cast<Variant*>(static_cast<const VariantMap&>(*this).find(key));
 }
@@ -58,7 +58,7 @@ Variant* VariantMap::find(const std::string& key) noexcept
     return const_cast<Variant*>(static_cast<const VariantMap&>(*this).find(key));
 }
 
-Variant* VariantMap::find(const char* key) noexcept
+Variant* VariantMap::find(const char* key)
 {
     return const_cast<Variant*>(static_cast<const VariantMap&>(*this).find(key));
 }
@@ -78,7 +78,7 @@ Variant& VariantMap::at(std::string_view key)
     return const_cast<Variant&>(static_cast<const VariantMap&>(*this).at(key));
 }
 
-bool VariantMap::contains(std::string_view key) const noexcept
+bool VariantMap::contains(std::string_view key) const
 {
     return find(key) != nullptr;
 }
@@ -159,15 +159,26 @@ const Variant* VariantMap::resolveFind(const Path& path) const noexcept
 {
     if (path.empty())
         return nullptr;
-    const auto& first = path.segments().front();
-    if (first.isIndex)
+    const auto& segments = path.segments();
+    if (segments.front().isIndex)
         return nullptr;
-    const Variant* value = find(first.key);
-    if (!value)
-        return nullptr;
-    if (path.size() == 1)
-        return value;
-    return value->find(path.slice(1));
+
+    // 逐段前进，不做 Path::slice（切片会复制剩余段，而每段都是分配）。
+    const Variant* cur = find(segments.front().key);
+    for (std::size_t i = 1; cur && i < segments.size(); ++i) {
+        const Path::Segment& seg = segments[i];
+        if (seg.isIndex) {
+            if (!cur->isList())
+                return nullptr;
+            const VariantList& list = cur->asList();
+            if (seg.index >= list.size())
+                return nullptr;
+            cur = &list[seg.index];
+        } else {
+            cur = cur->find(seg.key);
+        }
+    }
+    return cur;
 }
 
 const Variant& VariantMap::at(const Path& path) const

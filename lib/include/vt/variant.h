@@ -188,9 +188,12 @@ public:
 
     /**
      * @brief 取扩展槽的原始 std::any（可写；共享时会 detach）。
+     *
+     * 不标 noexcept：共享时 detach 会分配内存（bad_alloc 应能被上层看到，
+     * 而不是直接 terminate）。
      * @return std::any* 非扩展时返回 nullptr
      */
-    std::any* extensionAny() noexcept;
+    std::any* extensionAny();
 
     /**
      * @brief 取扩展槽的原始 std::any（只读，不 detach）。
@@ -387,12 +390,12 @@ public:
     }
 
     /**
-     * @brief 扩展槽中 T 的可写指针（共享时会 detach）。
+     * @brief 扩展槽中 T 的可写指针（共享时会 detach；可能分配内存）。
      * @param [in] T 目标类型
      * @return T* 非扩展或类型不符时 nullptr
      */
     template <class T>
-    T* extensionPtr() noexcept {
+    T* extensionPtr() {
         if (std::any* any = extensionAny())
             return std::any_cast<T>(any);
         return nullptr;
@@ -544,10 +547,13 @@ public:
 
     /**
      * @brief 按字面键查找（不抛）。
+     *
+     * 内部需要构造 std::string（C++17 的 unordered_map 没有异构查找），
+     * 因此不标 noexcept。
      * @param [in] std::string_view 键
      * @return const Variant* 缺失或类型不符返回 nullptr
      */
-    const Variant* find(std::string_view key) const noexcept;
+    const Variant* find(std::string_view key) const;
 
     /**
      * @brief 按字面键查找（不抛，无临时分配）。
@@ -561,7 +567,7 @@ public:
      * @param [in] const char* 键
      * @return const Variant* 缺失或类型不符返回 nullptr
      */
-    const Variant* find(const char* key) const noexcept;
+    const Variant* find(const char* key) const;
 
     /**
      * @brief 按字面键严格取值。
@@ -600,7 +606,7 @@ public:
      * @param [in] std::string_view 键
      * @return bool 是否存在
      */
-    bool contains(std::string_view key) const noexcept;
+    bool contains(std::string_view key) const;
 
     /**
      * @brief 以字面键写入；失败返回 false（不抛）。
@@ -718,7 +724,10 @@ public:
     /**
      * @brief 值相等比较。
      *
-     * 标量/字符串/容器递归比较；扩展类型只比较动态类型（std::any 没有通用相等语义）。
+     * 标量/字符串/容器递归比较。扩展类型：注册了 codec 时按 codec 编码出的
+     * 普通 Variant 比较（因此 `vector<int>` 等紧凑容器是内容比较，代价是一次
+     * 编码）；未注册 codec 或编码失败时只比较动态类型（std::any 没有通用
+     * 相等语义，这样至少保证 `v == v`）。
      * @param [in] Variant 另一个值
      * @return bool 是否相等
      */

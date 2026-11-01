@@ -17,7 +17,7 @@ vt::Variant VariantDocument::get(const vt::Path& path) const
     return vt::Variant();
 }
 
-bool VariantDocument::set(const std::string& path, vt::Variant value) noexcept
+bool VariantDocument::set(const std::string& path, vt::Variant value)
 {
     vt::Path parsed;
     if (!vt::Path::tryParse(path, parsed, &m_lastError))
@@ -25,7 +25,7 @@ bool VariantDocument::set(const std::string& path, vt::Variant value) noexcept
     return set(parsed, std::move(value));
 }
 
-bool VariantDocument::set(const vt::Path& path, vt::Variant value) noexcept
+bool VariantDocument::set(const vt::Path& path, vt::Variant value)
 {
     try {
         m_root.create(path) = std::move(value);

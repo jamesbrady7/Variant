@@ -227,6 +227,12 @@ void testNestedSerialization()
     auto fromBinary = vt::getAs<std::vector<std::vector<int>>>(binBack);
     CHECK(fromBinary.has_value() && (*fromBinary)[0][1] == 2);
 
+    // 相等语义：有 codec 的扩展值按内容比较。
+    CHECK(binBack == value);
+    CHECK(binBack != vt::Variant::fromValue(std::vector<std::vector<int>>{{1, 2}, {4}}));
+    // JSON 是 plain 表示（类型擦除成 List），槽类型不同 -> 与扩展槽原值不等。
+    CHECK(jsonBack != value);
+
     // 整数键：写进 JSON 是十进制字符串键的对象。
     const std::map<int, std::vector<std::string>> byId{{7, {"a"}}, {8, {"b"}}};
     const vt::Variant mapValue = vt::Variant::fromValue(byId);

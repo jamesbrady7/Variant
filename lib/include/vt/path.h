@@ -55,12 +55,15 @@ public:
 
     /**
      * @brief 不抛异常的解析。
+     *
+     * 语法错误通过返回值报告；不标 noexcept 是因为成功路径与错误信息
+     * 都会分配内存（OOM 时让 bad_alloc 照常向上抛，而不是 terminate）。
      * @param [in] std::string_view 路径文本
      * @param [out] Path 解析结果（失败时保持不变）
      * @param [out] std::string 可选错误信息
      * @return bool 是否解析成功
      */
-    static bool tryParse(std::string_view text, Path& out, std::string* error = nullptr) noexcept;
+    static bool tryParse(std::string_view text, Path& out, std::string* error = nullptr);
 
     /// @brief 是否为空路径（表示根自身）。
     bool empty() const noexcept { return m_segments.empty(); }

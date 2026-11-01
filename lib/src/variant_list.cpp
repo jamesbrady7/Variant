@@ -122,15 +122,28 @@ const Variant* VariantList::resolveFind(const Path& path) const noexcept
 {
     if (path.empty())
         return nullptr;
-    const auto& first = path.segments().front();
-    if (!first.isIndex)
+    const auto& segments = path.segments();
+    if (!segments.front().isIndex)
         return nullptr;
-    if (first.index >= m_data.size())
+    if (segments.front().index >= m_data.size())
         return nullptr;
-    const Variant* value = &m_data[first.index];
-    if (path.size() == 1)
-        return value;
-    return value->find(path.slice(1));
+
+    // 逐段前进，不做 Path::slice（切片会复制剩余段，而每段都是分配）。
+    const Variant* cur = &m_data[segments.front().index];
+    for (std::size_t i = 1; i < segments.size(); ++i) {
+        const Path::Segment& seg = segments[i];
+        if (seg.isIndex) {
+            if (!cur->isList())
+                return nullptr;
+            const VariantList& list = cur->asList();
+            if (seg.index >= list.size())
+                return nullptr;
+            cur = &list[seg.index];
+        } else {
+            cur = cur->find(seg.key);
+        }
+    }
+    return cur;
 }
 
 } // namespace vt

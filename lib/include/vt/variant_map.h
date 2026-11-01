@@ -66,10 +66,12 @@ public:
 
     /**
      * @brief 按字面键查找（只读）。
+     *
+     * 内部构造 std::string（C++17 的 unordered_map 没有异构查找），不标 noexcept。
      * @param [in] std::string_view 键
      * @return const Variant* 缺失返回 nullptr
      */
-    const Variant* find(std::string_view key) const noexcept;
+    const Variant* find(std::string_view key) const;
 
     /**
      * @brief 按字面键查找（只读，无临时分配）。
@@ -83,14 +85,14 @@ public:
      * @param [in] const char* 键
      * @return const Variant* 缺失返回 nullptr
      */
-    const Variant* find(const char* key) const noexcept;
+    const Variant* find(const char* key) const;
 
     /**
      * @brief 按字面键查找（可写）。
      * @param [in] std::string_view 键
      * @return Variant* 缺失返回 nullptr
      */
-    Variant* find(std::string_view key) noexcept;
+    Variant* find(std::string_view key);
 
     /**
      * @brief 按字面键查找（可写，无临时分配）。
@@ -104,7 +106,7 @@ public:
      * @param [in] const char* 键
      * @return Variant* 缺失返回 nullptr
      */
-    Variant* find(const char* key) noexcept;
+    Variant* find(const char* key);
 
     /**
      * @brief 按字面键严格取值。
@@ -127,7 +129,7 @@ public:
      * @param [in] std::string_view 键
      * @return bool 是否存在
      */
-    bool contains(std::string_view key) const noexcept;
+    bool contains(std::string_view key) const;
 
     /**
      * @brief 删除字面键。
