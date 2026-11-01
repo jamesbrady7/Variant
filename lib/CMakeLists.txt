@@ -11,6 +11,7 @@ add_library(variant_core SHARED
     src/binary.cpp
     src/json.cpp
     src/adapters.cpp
+    src/normalize.cpp
 )
 
 target_include_directories(variant_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

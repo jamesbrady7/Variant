@@ -9,6 +9,7 @@
 #include <fstream>
 #include <sstream>
 #include <limits>
+#include <map>
 #include <string_view>
 #include <random>
 #include <string>
@@ -205,6 +206,42 @@ void testBuiltinSerialization()
     vt::JsonWriteOptions reject;
     reject.extensions = vt::ExtensionPolicy::Reject;
     CHECK_EQ(vt::json::write(ivec, reject), std::string("[1,2,3]"));
+}
+
+void testNestedSerialization()
+{
+    // 容器 codec 由 fromValue 自动登记，且是 plain：JSON 写出普通嵌套数组。
+    const std::vector<std::vector<int>> grid{{1, 2}, {3}};
+    const vt::Variant value = vt::Variant::fromValue(grid);
+    CHECK_EQ(vt::json::write(value), std::string("[[1,2],[3]]"));
+
+    const vt::Variant jsonBack = vt::json::read(vt::json::write(value));
+    CHECK(jsonBack.isList());
+    auto fromJson = vt::getAs<std::vector<std::vector<int>>>(jsonBack);
+    CHECK(fromJson.has_value() && (*fromJson)[1][0] == 3);
+
+    // 二进制：类型名由模板自动生成，读回仍是紧凑扩展槽。
+    const vt::Variant binBack = vt::binary::read(vt::binary::write(value));
+    CHECK(binBack.isExtension());
+    CHECK((binBack.is<std::vector<std::vector<int>>>()));
+    auto fromBinary = vt::getAs<std::vector<std::vector<int>>>(binBack);
+    CHECK(fromBinary.has_value() && (*fromBinary)[0][1] == 2);
+
+    // 整数键：写进 JSON 是十进制字符串键的对象。
+    const std::map<int, std::vector<std::string>> byId{{7, {"a"}}, {8, {"b"}}};
+    const vt::Variant mapValue = vt::Variant::fromValue(byId);
+    CHECK_EQ(vt::json::write(mapValue), std::string("{\"7\":[\"a\"],\"8\":[\"b\"]}"));
+    auto mapBack = vt::getAs<std::map<int, std::vector<std::string>>>(
+        vt::json::read(vt::json::write(mapValue)));
+    CHECK(mapBack.has_value() && (*mapBack)[8][0] == "b");
+
+    // 只读进程的编译期锚点：显式登记后，二进制按名字恢复。
+    vt::registerContainerAdapters<std::vector<std::pair<int, std::string>>>();
+    const std::vector<std::pair<int, std::string>> pairs{{1, "x"}};
+    const vt::Variant pairBack =
+        vt::binary::read(vt::binary::write(vt::Variant::fromValue(pairs)));
+    auto restored = vt::getAs<std::vector<std::pair<int, std::string>>>(pairBack);
+    CHECK(restored.has_value() && (*restored)[0].second == "x");
 }
 
 void testJsonBuiltins()
@@ -942,6 +979,7 @@ int main()
 
     RUN(testAdapters);
     RUN(testBuiltinSerialization);
+    RUN(testNestedSerialization);
     RUN(testJsonBuiltins);
     RUN(testJsonPretty);
     RUN(testJsonErrors);

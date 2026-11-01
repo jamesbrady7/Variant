@@ -1,11 +1,14 @@
 // vt::Variant 单元测试。无外部框架：失败计数即退出码（0=全绿）。
 #include "vt/vt.h"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -455,6 +458,94 @@ void testExtension()
     CHECK(!raw.typeName().empty());
 }
 
+void testNestedContainers()
+{
+    // 1) 外层容器仍是紧凑扩展槽，归一化/反归一化按 traits 自动递归。
+    const std::vector<std::vector<int>> grid{{1, 2}, {3}};
+    vt::Variant v = vt::Variant::fromValue(grid);
+    CHECK(v.isExtension());
+    CHECK(v.is<std::vector<std::vector<int>>>());
+
+    auto gridBack = vt::getAs<std::vector<std::vector<int>>>(v);
+    CHECK(gridBack.has_value());
+    CHECK_EQ(gridBack->size(), std::size_t(2));
+    CHECK_EQ((*gridBack)[0][1], 2);
+    CHECK_EQ((*gridBack)[1][0], 3);
+
+    // 2) 纯 List 表示（JSON 读回/ Python 传入的形态）也能还原。
+    vt::Variant plain = vt::VariantList{
+        vt::VariantList{1, 2},
+        vt::VariantList{3},
+    };
+    auto fromPlain = vt::getAs<std::vector<std::vector<int>>>(plain);
+    CHECK(fromPlain.has_value());
+    CHECK_EQ((*fromPlain)[1][0], 3);
+    CHECK(!vt::getAs<std::vector<std::vector<int>>>(
+               vt::Variant(vt::VariantList{vt::VariantList{1, "x"}}))
+               .has_value());
+
+    // 3) map<string, vector<int>>
+    const std::map<std::string, std::vector<int>> named{{"a", {1, 2}}, {"b", {3}}};
+    vt::Variant namedVar = vt::Variant::fromValue(named);
+    CHECK(namedVar.isExtension());
+    auto namedBack = vt::getAs<std::map<std::string, std::vector<int>>>(namedVar);
+    CHECK(namedBack.has_value());
+    CHECK_EQ((*namedBack)["a"].size(), std::size_t(2));
+
+    // 4) vector<map<string,int>>
+    const std::vector<std::map<std::string, int>> rows{{{"x", 1}}, {{"y", 2}}};
+    auto rowsBack = vt::getAs<std::vector<std::map<std::string, int>>>(
+        vt::Variant::fromValue(rows));
+    CHECK(rowsBack.has_value());
+    CHECK_EQ((*rowsBack)[1]["y"], 2);
+
+    // 5) 整数键按十进制字符串写进 Map，读回按 key_type 解析。
+    const std::map<int, std::vector<std::string>> byId{{7, {"a"}}, {8, {"b"}}};
+    vt::Variant byIdVar = vt::Variant::fromValue(byId);
+    CHECK(byIdVar.isExtension());
+    auto byIdBack = vt::getAs<std::map<int, std::vector<std::string>>>(byIdVar);
+    CHECK(byIdBack.has_value());
+    CHECK_EQ((*byIdBack)[8][0], std::string("b"));
+
+    // 6) pair / set / array
+    const std::pair<int, std::string> pairValue{4, "four"};
+    vt::Variant pairVar = vt::Variant::fromValue(pairValue);
+    CHECK(pairVar.isExtension());
+    auto pairBack = vt::getAs<std::pair<int, std::string>>(pairVar);
+    CHECK(pairBack.has_value() && pairBack->first == 4 && pairBack->second == "four");
+
+    const std::vector<std::pair<int, std::string>> pairList{{1, "a"}, {2, "b"}};
+    auto pairListBack = vt::getAs<std::vector<std::pair<int, std::string>>>(
+        vt::Variant::fromValue(pairList));
+    CHECK(pairListBack.has_value());
+    CHECK_EQ((*pairListBack)[1].second, std::string("b"));
+
+    const std::set<int> ids{3, 1, 2};
+    auto idsBack = vt::getAs<std::set<int>>(vt::Variant::fromValue(ids));
+    CHECK(idsBack.has_value());
+    CHECK_EQ(*idsBack->begin(), 1);
+
+    using Triple = std::array<int, 3>;
+    using Pair2 = std::array<int, 2>;
+    const Triple triple{1, 2, 3};
+    CHECK(vt::getAs<Triple>(vt::Variant::fromValue(triple)).has_value());
+    CHECK(!vt::getAs<Pair2>(vt::Variant::fromValue(triple)).has_value());
+
+    // 7) 归一化表已自动登记（Python 桥在扩展槽转换时用它）。
+    CHECK(vt::detail::findNormalizer(std::type_index(typeid(std::vector<std::vector<int>>)))
+          != nullptr);
+    CHECK(vt::detail::findNormalizer(std::type_index(typeid(std::vector<std::map<std::string, int>>)))
+          != nullptr);
+    // 内层类型不单独登记：归一化递归在编译期完成，运行时只需外层入口。
+    CHECK(vt::detail::findNormalizer(std::type_index(typeid(std::map<std::string, int>)))
+          == nullptr);
+    CHECK(vt::detail::findNormalizer(std::type_index(typeid(Probe))) == nullptr);
+
+    // 8) 归一化只用于转换，不改写存储：扩展槽里仍是原对象。
+    CHECK(vt::detail::normalizeToVariant(grid).isList());
+    CHECK_EQ(vt::detail::normalizeToVariant(grid).asList().size(), std::size_t(2));
+}
+
 void testDocument()
 {
     VariantDocument doc;
@@ -546,6 +637,7 @@ int main()
     RUN(testVectorPayload);
     RUN(testSharedPointerStorage);
     RUN(testExtension);
+    RUN(testNestedContainers);
     RUN(testDocument);
     RUN(testEqualityAndDescribe);
     RUN(testPathRoundTrip);

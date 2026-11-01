@@ -1,5 +1,6 @@
 #pragma once
 
+#include "container_traits.h"
 #include "export.h"
 #include "path.h"
 #include "variant_error.h"
@@ -21,6 +22,20 @@
 #include <vector>
 
 namespace vt {
+
+namespace detail {
+
+/**
+ * @brief `fromValue` 的容器分支：登记归一化函数/自动 codec 后放进扩展槽。
+ *
+ * 定义在 `vt/normalize.h`（需要 VariantMap / VariantList 完整类型）：
+ * 对容器类型调用 `Variant::fromValue` 的 TU 需要包含 `vt/normalize.h`
+ * 或 `vt/adapters.h` / `vt/vt.h`。
+ */
+template <class T>
+Variant extendValue(T&& value);
+
+} // namespace detail
 
 /**
  * @brief 值语义的类型擦除容器。
@@ -480,6 +495,10 @@ public:
             return Variant(value);
         } else if constexpr (std::is_same_v<U, std::nullptr_t>) {
             return Variant();
+        } else if constexpr (detail::is_container_v<U>) {
+            // 容器：紧凑存进扩展槽，同时登记归一化函数与自动 codec，
+            // 之后的 Python 转换 / 嵌套序列化 / getAs 都能递归下去。
+            return detail::extendValue(std::forward<T>(value));
         } else {
             return fromValue(std::any(std::forward<T>(value)));
         }
