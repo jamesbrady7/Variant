@@ -58,16 +58,13 @@ int main()
     const std::string exeDir = executableDir();
     initPython(exeDir);
 
-    PyRun_SimpleString(
+    // PyRun_SimpleString 在 Python 抛异常时会自己打印 traceback 并返回 -1，
+    // 事后 PyErr_Occurred() 已经是 false —— 必须用返回值判断成败，
+    // 否则脚本里的断言失败会被静默吞掉、退出码仍是 0。
+    const int rc = PyRun_SimpleString(
         "import shared_ownership_test as test\n"
         "test.run()\n");
 
-    if (PyErr_Occurred()) {
-        PyErr_Print();
-        Py_Finalize();
-        return 1;
-    }
-
     Py_Finalize();
-    return 0;
+    return rc == 0 ? 0 : 1;
 }

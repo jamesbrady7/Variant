@@ -58,16 +58,15 @@ int main()
     const std::string exeDir = executableDir();
     initPython(exeDir);
 
-    PyRun_SimpleString(
+    // 返回值才是成败依据：PyRun_SimpleString 出错时会先打印 traceback
+    // 再返回 -1，调用方看到的 PyErr_Occurred() 已经清空。
+    const int rc = PyRun_SimpleString(
         "import variant_binding as vb\n"
         "if not vb.initTypes():\n"
         "    raise RuntimeError('initTypes() failed')\n"
         "import demo\n"
         "demo.run()\n");
 
-    if (PyErr_Occurred())
-        PyErr_Print();
-
     Py_Finalize();
-    return 0;
+    return rc == 0 ? 0 : 1;
 }

@@ -222,6 +222,15 @@ private:
         }
         Frame& frame = m_stack.back();
         if (!frame.isDict) {
+            // 事件流声称的长度就是 PyList_New 的长度；越界写入是内存破坏，
+            // 所以这里宁可响亮失败。正常遍历不会触发（契约由 visitValue 保证）。
+            if (frame.index >= PyList_GET_SIZE(frame.container)) {
+                Py_DECREF(obj);
+                m_failed = true;
+                PyErr_SetString(PyExc_RuntimeError,
+                                "vt: list event stream exceeded its declared size");
+                return;
+            }
             PyList_SET_ITEM(frame.container, frame.index++, obj);   // 窃取引用
             return;
         }
@@ -252,6 +261,16 @@ private:
         const Frame frame = m_stack.back();
         m_stack.pop_back();
         Py_XDECREF(frame.key);   // 不完整的 dict 条目
+
+        // PyList_New 的长度是遍历时声明的：没填满就交出去会让 Python
+        // 读到 NULL 槽位。这与"超出声明长度"一样属于事件流违约，必须报错。
+        if (!frame.isDict && frame.index != PyList_GET_SIZE(frame.container)) {
+            Py_DECREF(frame.container);
+            m_failed = true;
+            PyErr_SetString(PyExc_RuntimeError,
+                            "vt: list event stream did not fill its declared size");
+            return;
+        }
         deliver(frame.container);
     }
 
