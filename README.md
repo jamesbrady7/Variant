@@ -69,9 +69,12 @@ PATH="E:/Qt/5.15.2/msvc2019_64/bin:$PATH" build/bin/Release/vt_bench.exe
 python py_scripts/demo.py
 ```
 
-> 绑定目标只支持 **Release**：Windows 官方 Python 发行版不带 `pythonXY_d.lib`，
-> Debug 下 `_DEBUG` 会让 Python 头文件启用 `Py_DEBUG`，引用 release 库中不存在的
-> `_Py_RefTotal` 等符号。core / tests / bench 的 Debug 配置不受影响
+> 绑定目标**不能用 Debug**，请用 **Release / RelWithDebInfo**（RelWithDebInfo
+> 同样产出 PDB，日常调绑定代码用它）。Debug 下 MSVC 定义 `_DEBUG`，CPython 的
+> `pyconfig.h` 会做两件事：① `#pragma comment(lib,"pythonXY_d.lib")` —— 官方
+> Windows 发行版不提供 debug 库，链接器直接 `LNK1104`；② 定义 `Py_DEBUG` →
+> `Py_REF_DEBUG`，引用 release DLL 不导出的 `_Py_RefTotal` 等符号。
+> core / tests / bench 的 Debug 配置不受影响
 > （`cmake --build build --config Debug --target vt_tests vt_serial_tests`）。
 
 ## 关键设计（详见 docs）
