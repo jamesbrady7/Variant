@@ -1,5 +1,6 @@
 #include "variant_python.h"
 
+#include "vt/normalize.h"
 #include "vt/variant_list.h"
 #include "vt/variant_map.h"
 
@@ -201,7 +202,18 @@ bool canConvertToPython(const vt::Variant& value)
         return true;
     case vt::Variant::Type::Extension: {
         const std::any* any = value.extensionAny();
-        return any && findHookByType(any->type()) != nullptr;
+        if (!any)
+            return true;
+        // 容器类型：自动登记的归一化函数能把扩展槽展开成普通 List/Map，
+        // 之后按普通结构递归检查即可。
+        if (vt::detail::NormalizerFn normalizer = vt::detail::findNormalizer(any->type())) {
+            try {
+                return canConvertToPython(normalizer(*any));
+            } catch (...) {
+                return false;
+            }
+        }
+        return findHookByType(any->type()) != nullptr;
     }
     }
     return false;
@@ -233,8 +245,18 @@ PyObject* toPython(const vt::Variant& value)
                 Py_RETURN_NONE;
             const Hook* hook = findHookByType(any->type());
             if (!hook || !hook->toPython) {
+                // 容器类型（vector/map/set/pair/array 及其嵌套）无需注册 hook：
+                // fromValue 时自动登记的归一化函数把扩展槽展开成普通 List/Map，
+                // 再按同一套规则递归转换。
+                if (vt::detail::NormalizerFn normalizer =
+                        vt::detail::findNormalizer(any->type())) {
+                    return toPython(normalizer(*any));
+                }
                 PyErr_Format(PyExc_TypeError,
-                             "vt::Variant holds '%s' but no Python converter is registered",
+                             "vt::Variant holds '%s' but no Python converter is registered "
+                             "(custom types need vpy::register*Type; containers register "
+                             "automatically when passed to Variant::fromValue, or call "
+                             "vt::registerContainerAdapters<T>)",
                              value.typeName().c_str());
                 return nullptr;
             }

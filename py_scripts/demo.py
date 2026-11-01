@@ -121,9 +121,18 @@ def run():
     check(builtins["ints"] == [1, 2, 3], "vector<int> -> list")
     check(builtins["strings"] == ["a", "b"], "vector<string> -> list")
     check(builtins["strmap"] == {"x": "y"}, "map<string,string> -> dict")
-    check(builtins["intmap"] == {1: 2, 3: 4}, "map<int,int> -> dict[int,int]")
+    # 非字符串键按十进制字符串写出（与 JSON 的 int 键格式一致）。
+    check(builtins["intmap"] == {"1": 2, "3": 4}, "map<int,int> -> dict（键为十进制字符串）")
     check(vb.sumInts([4, 5, 6]) == 15, "Python list -> vector<int> 参数")
     check(vb.intMapSize({1: 2, 3: 4, 5: 6}) == 3, "Python dict[int,int] -> unordered_map 参数")
+
+    nested = vb.makeNestedSample()
+    check(nested["grid"] == [[1, 2], [3, 4, 5]], "vector<vector<int>> -> 嵌套 list")
+    check(nested["rows"] == [{"x": 1}, {"y": 2, "z": 3}],
+          "vector<map<string,int>> -> list[dict]")
+    check(nested["by_id"] == {"7": ["a", "b"], "8": ["c"]},
+          "map<int,vector<string>> -> dict[str, list]")
+    check(nested["pairs"] == [[1, "one"], [2, "two"]], "vector<pair<int,string>> -> 二元 list")
 
     print("\n=== 6. 错误路径：必须响亮失败 ===")
     expect_type_error(lambda: vb.echo({1, 2}), "set 不是可转换类型")

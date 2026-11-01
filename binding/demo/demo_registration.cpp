@@ -1,6 +1,5 @@
 #include "variant_python.h"
 
-#include "container_hooks.h"
 #include "demo_types.h"
 
 #include "vt/codec.h"
@@ -19,8 +18,9 @@ bool registerDemoTypes()
     if (registered)
         return true;
 
-    // 内建容器：C++ -> Python 的 list/dict
-    bool ok = registerBuiltinContainerHooks();
+    // 标准容器不需要注册：Variant::fromValue 遇到容器类型时会自动登记
+    // 归一化函数（toPython 的扩展槽回退会用它递归展开成 list/dict）。
+    bool ok = true;
 
     // 一行注册同时完成：核心名字表 + Python 转换器（见 registerPointerType 实现）。
     ok = registerPointerType<DemoNode>("variant_binding", "DemoNode") && ok;

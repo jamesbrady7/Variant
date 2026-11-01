@@ -5,7 +5,6 @@
 # ---------------------------------------------------------------------------
 add_library(variant_python_core STATIC
     core/variant_python.cpp
-    core/container_hooks.cpp
 )
 
 target_include_directories(variant_python_core
@@ -53,7 +52,6 @@ shiboken_generator_create_binding(
     LIBRARY_TARGET variant_core
     TYPESYSTEM_FILE ${CMAKE_CURRENT_SOURCE_DIR}/variant_bindings.xml
     HEADERS
-        ${CMAKE_CURRENT_SOURCE_DIR}/core/container_hooks.h
         ${CMAKE_CURRENT_SOURCE_DIR}/demo/shared_bridge.h
         ${CMAKE_SOURCE_DIR}/demo/demo_types.h
         ${CMAKE_SOURCE_DIR}/demo/variant_demo_api.h
@@ -87,7 +85,6 @@ if(MSVC)
     target_compile_options(variant_binding PRIVATE
         "/FI${CMAKE_SOURCE_DIR}/lib/include/vt/variant.h"
         "/FI${CMAKE_SOURCE_DIR}/binding/core/variant_python.h"
-        "/FI${CMAKE_SOURCE_DIR}/binding/core/container_hooks.h"
         "/FI${CMAKE_SOURCE_DIR}/binding/demo/shared_bridge.h"
         "/FI${CMAKE_SOURCE_DIR}/demo/demo_types.h"
         "/FI${CMAKE_SOURCE_DIR}/demo/variant_demo_api.h"

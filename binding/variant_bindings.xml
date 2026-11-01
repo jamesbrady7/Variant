@@ -121,6 +121,13 @@
         </inject-code>
     </add-function>
 
+    <add-function signature="makeNestedSample()">
+        <inject-code class="target" position="beginning">
+            auto cppResult = makeNestedSample();
+            return %CONVERTTOPYTHON[vt::Variant](cppResult);
+        </inject-code>
+    </add-function>
+
     <add-function signature="echo(const vt::Variant&amp;)">
         <inject-code class="target" position="beginning">
             auto cppResult = echo(cppArg0);

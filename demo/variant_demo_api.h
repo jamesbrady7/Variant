@@ -24,6 +24,15 @@ VT_DEMO_API vt::Variant makeSample();
 VT_DEMO_API vt::Variant makeBuiltinSample();
 
 /**
+ * @brief 构造一棵嵌套标准容器的示例树（无需任何逐类型注册）。
+ *
+ * 含 `vector<vector<int>>`、`vector<map<string,int>>`、
+ * `map<int, vector<string>>`、`vector<pair<int,string>>`。
+ * @return vt::Variant 示例根值
+ */
+VT_DEMO_API vt::Variant makeNestedSample();
+
+/**
  * @brief 原样返回传入的 Variant（用于跨语言往返测试）。
  * @param [in] vt::Variant 值
  * @return vt::Variant 同一个值

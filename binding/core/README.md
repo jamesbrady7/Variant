@@ -8,8 +8,12 @@
 | 文件 | 作用 |
 | --- | --- |
 | `variant_python.h` / `variant_python.cpp` | Hook 表、`toPython/fromPython`、`registerPointerType/ValueType/SharedType`、共享所有权（capsule/收养） |
-| `container_hooks.h` / `container_hooks.cpp` | 扩展槽内建容器（`vector<int>` 等）的 C++→Python hook，可选 |
 | `glue/variant_convert.cpp` | 由 typesystem 用 `// @snippet` 抽取的转换片段，不直接编译 |
+
+> **标准容器不需要任何注册**：`Variant::fromValue` 遇到 `vector/map/set/pair/array`
+> （及其任意嵌套）时，会按 `vt/container_traits.h` 自动登记归一化函数，
+> `toPython` 的扩展槽回退会用它展开成原生 list/dict。旧的
+> `container_hooks.*`（逐类型手写 hook）已删除，内嵌容器不再需要单独适配。
 | `variant_bindings.xml` 的 CORE 段 | 见下面"typesystem" |
 
 ## typesystem
@@ -37,8 +41,7 @@
 
 ```cmake
 add_library(variant_python_core STATIC
-    <copy>/core/variant_python.cpp
-    <copy>/core/container_hooks.cpp)
+    <copy>/core/variant_python.cpp)
 target_include_directories(variant_python_core
     PUBLIC  <copy>/core
     PRIVATE ${VT_PYTHON_ROOT}/include)
@@ -61,13 +64,14 @@ target_compile_options(variant_python_core PRIVATE /utf-8
 ```cpp
 bool registerMyTypes()
 {
-    bool ok = vpy::registerBuiltinContainerHooks();          // 可选：扩展槽容器
-    ok = vpy::registerPointerType<MyNode>("my_module", "MyNode") && ok;
+    bool ok = vpy::registerPointerType<MyNode>("my_module", "MyNode");
     ok = vpy::registerValueType<MyColor>("my_module", "MyColor") && ok;
     ok = vpy::registerSharedType<MyShared>("my_module", "MyShared") && ok;
     return ok;
 }
 ```
+
+只让标准容器跨语言、不注册任何自定义类型时，这个函数可以整个省略。
 
 ## 硬约束
 

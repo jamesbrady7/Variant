@@ -5,8 +5,10 @@
 #include "vt/variant_list.h"
 #include "vt/variant_map.h"
 
+#include <map>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace vt::literals;
@@ -42,6 +44,20 @@ vt::Variant makeBuiltinSample()
         std::unordered_map<std::string, std::string>{{"x", "y"}});
     root["intmap"] = vt::Variant::fromValue(
         std::unordered_map<int, int>{{1, 2}, {3, 4}});
+    return vt::Variant(std::move(root));
+}
+
+vt::Variant makeNestedSample()
+{
+    vt::VariantMap root;
+    root["grid"] = vt::Variant::fromValue(
+        std::vector<std::vector<int>>{{1, 2}, {3, 4, 5}});
+    root["rows"] = vt::Variant::fromValue(
+        std::vector<std::map<std::string, int>>{{{"x", 1}}, {{"y", 2}, {"z", 3}}});
+    root["by_id"] = vt::Variant::fromValue(
+        std::map<int, std::vector<std::string>>{{7, {"a", "b"}}, {8, {"c"}}});
+    root["pairs"] = vt::Variant::fromValue(
+        std::vector<std::pair<int, std::string>>{{1, "one"}, {2, "two"}});
     return vt::Variant(std::move(root));
 }
 
