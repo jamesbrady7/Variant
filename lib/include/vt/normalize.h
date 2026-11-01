@@ -56,16 +56,22 @@ struct ValueSink {
     /// @brief 空值。
     virtual void onNull() = 0;
     /// @brief bool 叶子。
+    /// @param [in] bool 布尔值
     virtual void onBool(bool value) = 0;
-    /// @brief 整数叶子（统一 int64，越界规则与 `Variant` 一致）。
+    /// @brief 整数叶子。
+    /// @param [in] std::int64_t 整数值（越界规则与 `Variant` 一致）
     virtual void onInt(std::int64_t value) = 0;
     /// @brief 浮点叶子。
+    /// @param [in] double 浮点值
     virtual void onDouble(double value) = 0;
     /// @brief UTF-8 字符串叶子。
+    /// @param [in] std::string_view 字符串视图（不保证以 '\0' 结尾）
     virtual void onString(std::string_view value) = 0;
     /// @brief 已经成型的 `Variant`（不拆解，由 sink 决定原样保留还是继续转换）。
+    /// @param [in] Variant 值
     virtual void onVariant(const Variant& value) = 0;
     /// @brief 扩展槽叶子（自定义类型）。
+    /// @param [in] std::any 扩展值
     virtual void onExtension(const std::any& value) = 0;
 
     /// @brief 序列开始。
@@ -89,24 +95,29 @@ struct ValueSink {
     virtual void onEntryEnd() = 0;
 };
 
-/// 归一化函数：把扩展槽里的容器按事件流写给 sink。
+/**
+ * @brief 遍历函数：把扩展槽里的容器按 `ValueSink` 事件流写出去。
+ *
+ * 由 `installContainerAdapters<T>` 在 `Variant::fromValue<T>` 首次见到容器
+ * 类型时登记；`std::any` 里必须是登记时的那个 `T`，否则抛 `TypeMismatch`。
+ */
 using NormalizerFn = void (*)(const std::any&, ValueSink&);
 
 /**
- * @brief 登记一个扩展类型的归一化函数（Python 桥在扩展槽转换失败时使用）。
+ * @brief 登记一个容器类型的遍历函数（Python 桥与 codec 在扩展槽上使用）。
  * @param [in] std::type_index 类型索引
- * @param [in] NormalizerFn 归一化函数
+ * @param [in] NormalizerFn 遍历函数
  */
 VT_API void registerNormalizer(std::type_index type, NormalizerFn fn);
 
 /**
- * @brief 按类型查找归一化函数。
+ * @brief 按类型查找遍历函数。
  * @param [in] std::type_index 类型索引
  * @return NormalizerFn 未登记返回 nullptr
  */
 VT_API NormalizerFn findNormalizer(std::type_index type);
 
-/// @brief 清空归一化表（主要用于测试）。
+/// @brief 清空遍历函数表（主要用于测试）。
 VT_API void clearNormalizers();
 
 template <class T>
@@ -298,11 +309,16 @@ public:
     /// @return Variant 归一化结果
     Variant take() { return std::move(m_root); }
 
+    /// @brief Null -> 空 Variant。
     void onNull() override { emit(Variant()); }
+    /// @brief bool -> Bool 槽。
     void onBool(bool value) override { emit(Variant(value)); }
+    /// @brief 整数 -> Int 槽。
     void onInt(std::int64_t value) override { emit(Variant(value)); }
+    /// @brief 浮点 -> Double 槽。
     void onDouble(double value) override { emit(Variant(value)); }
 
+    /// @brief 字符串 -> String 槽；Text 形态映射里条目开头的那个是键。
     void onString(std::string_view value) override
     {
         // Text 形态的映射键以字符串事件发出；条目里的第一个字符串就是键。
@@ -316,9 +332,12 @@ public:
         emit(Variant(std::string(value)));
     }
 
+    /// @brief 已成型的 Variant 原样保留（与改造前 `normalizeToVariant(Variant)` 一致）。
     void onVariant(const Variant& value) override { emit(value); }
+    /// @brief 扩展槽叶子 -> 扩展槽 Variant（容器仍紧凑存放，不在此展开）。
     void onExtension(const std::any& value) override { emit(Variant::fromValue(value)); }
 
+    /// @brief 序列开始：压入一个 List 帧。
     void onListBegin(std::size_t size) override
     {
         Frame frame;
@@ -326,12 +345,19 @@ public:
         m_frames.push_back(std::move(frame));
     }
 
+    /// @brief 序列结束：弹出帧并作为 VariantList 交给父容器。
     void onListEnd() override
     {
         Frame frame = popFrame();
         emit(Variant(std::move(frame.items)));
     }
 
+    /**
+     * @brief 映射开始：按键能否字符串化选择帧形态。
+     * @param [in] size 条目数
+     * @param [in] keyConvertible 键类型是否可无损字符串化
+     * @return MapKeyForm 实际采用的形态（不可转换时只能是 `Typed`）
+     */
     MapKeyForm onMapBegin(std::size_t size, bool keyConvertible) override
     {
         Frame frame;
@@ -345,6 +371,7 @@ public:
         return m_frames.back().form;
     }
 
+    /// @brief 映射结束：Text -> VariantMap，Typed -> `[[k,v], ...]`。
     void onMapEnd() override
     {
         Frame frame = popFrame();
@@ -354,8 +381,10 @@ public:
             emit(Variant(std::move(frame.items)));
     }
 
+    /// @brief 条目开始：无状态（Text 帧靠 `haveKey` 区分键与值）。
     void onEntryBegin() override {}
 
+    /// @brief 条目结束：Typed 帧把刚追加的键、值折叠成一个二元 List。
     void onEntryEnd() override
     {
         if (!m_frames.empty())
@@ -553,11 +582,15 @@ bool denormalizeFromVariant(const Variant& value, T& out)
 // ------------------------------------------------------------ 注册
 
 /**
- * @brief 为一个容器类型登记归一化函数（+ 自动 codec，若用户尚未注册）。
+ * @brief 为一个容器类型登记遍历函数（+ 自动 codec，若用户尚未注册）。
+ *
+ * 遍历函数里做的只有一件事：`visitValue(*value, sink)`——递归在编译期展开，
+ * 运行期只按 `typeid` 找到这个入口。
  *
  * 由 `Variant::fromValue` 在第一次见到该类型时自动调用；只读进程（例如
  * 只读 JSON/二进制文件、从不构造该类型）需要显式调用
  * `vt::registerContainerAdapters<T>()` 作为编译期锚点。
+ * @param [in] T 容器类型
  */
 template <class T>
 void installContainerAdapters()
@@ -582,7 +615,7 @@ void installContainerAdapters()
 }
 
 /**
- * @brief 保证容器类型 T 的归一化函数与 codec 已登记（每个类型只做一次）。
+ * @brief 保证容器类型 T 的遍历函数与 codec 已登记（每个类型只做一次）。
  * @param [in] T 容器类型
  */
 template <class T>
@@ -669,7 +702,7 @@ bool getAs(const Variant& value, T& out)
 }
 
 /**
- * @brief 显式登记容器 T 的归一化函数与自动 codec。
+ * @brief 显式登记容器 T 的遍历函数与自动 codec。
  *
  * 只读进程的编译期锚点：从 JSON/二进制读回 `vector<vector<int>>` 等容器时，
  * 若进程内从未 `fromValue` 过该类型，需要先调用它。

@@ -106,6 +106,7 @@ public:
         return result;
     }
 
+    /// @brief Null -> `None`。
     void onNull() override
     {
         if (m_failed)
@@ -114,25 +115,32 @@ public:
         deliver(Py_None);
     }
 
+    /// @brief bool -> `bool`（先于 int 判断，Python 里 bool 是 int 子类）。
     void onBool(bool value) override { deliverNew(PyBool_FromLong(value ? 1 : 0)); }
+    /// @brief 整数 -> `int`。
     void onInt(std::int64_t value) override { deliverNew(PyLong_FromLongLong(value)); }
+    /// @brief 浮点 -> `float`。
     void onDouble(double value) override { deliverNew(PyFloat_FromDouble(value)); }
 
+    /// @brief UTF-8 字符串 -> `str`（非法 UTF-8 由 Python 报错）。
     void onString(std::string_view value) override
     {
         deliverNew(PyUnicode_DecodeUTF8(value.data(), static_cast<Py_ssize_t>(value.size()),
                                         "strict"));
     }
 
+    /// @brief 已成型的 Variant 沿用既有 `toPython`（含共享所有权等 hook 行为）。
     void onVariant(const vt::Variant& value) override
     {
         if (m_failed)
             return;
-        deliverNew(toPython(value));   // 已经是 Variant 的值沿用既有转换
+        deliverNew(toPython(value));
     }
 
+    /// @brief 扩展槽叶子：hook -> 遍历函数 -> TypeError（见定义）。
     void onExtension(const std::any& any) override;
 
+    /// @brief 序列开始：按已知长度预分配 list。
     void onListBegin(std::size_t size) override
     {
         if (m_failed)
@@ -145,11 +153,12 @@ public:
         m_stack.push_back(Frame{list, false, nullptr, 0});
     }
 
+    /// @brief 序列结束：把 list 交给父容器 / 作为根值。
     void onListEnd() override { closeFrame(); }
 
+    /// @brief 映射开始：永远返回 `Typed`，键按原类型给（Python dict 不挑键类型）。
     vt::detail::MapKeyForm onMapBegin(std::size_t, bool) override
     {
-        // 永远要真实键：Python dict 能容纳 int / 字符串 / 可哈希对象。
         if (m_failed)
             return vt::detail::MapKeyForm::Typed;
         PyObject* dict = PyDict_New();
@@ -161,10 +170,13 @@ public:
         return vt::detail::MapKeyForm::Typed;
     }
 
+    /// @brief 映射结束：把 dict 交给父容器 / 作为根值。
     void onMapEnd() override { closeFrame(); }
 
+    /// @brief 条目开始：无状态（dict 帧用 `key == nullptr` 判断"下一个是键"）。
     void onEntryBegin() override {}
 
+    /// @brief 条目结束：释放没用上的键（事件流不完整时才会出现）。
     void onEntryEnd() override
     {
         // 正常情况下键已被值消费；残留说明事件流不完整，直接释放。
@@ -177,11 +189,13 @@ public:
 private:
     struct Frame {
         PyObject* container = nullptr;   ///< 正在构建的 list / dict（新引用）
-        bool isDict = false;
+        bool isDict = false;             ///< true = dict 帧，否则 list 帧
         PyObject* key = nullptr;         ///< dict 的待写入键（新引用）
         Py_ssize_t index = 0;            ///< list 的写入位置
     };
 
+    /// @brief 接收 Python API 返回的新引用；nullptr 表示失败（PyErr 已设置）。
+    /// @param [in] PyObject* 新引用（可能为 nullptr）
     void deliverNew(PyObject* obj)
     {
         if (m_failed) {
@@ -196,6 +210,9 @@ private:
     }
 
     /// @brief 把 obj（接管所有权）放进当前容器 / 作为根值。
+    ///
+    /// dict 帧里第一个到达的是键（先做可哈希检查），第二个才是值。
+    /// @param [in] PyObject* 新引用
     void deliver(PyObject* obj)
     {
         if (m_stack.empty()) {
@@ -227,6 +244,7 @@ private:
             m_failed = true;
     }
 
+    /// @brief 关闭栈顶帧，把容器交给父容器 / 作为根值。
     void closeFrame()
     {
         if (m_failed || m_stack.empty())
@@ -237,6 +255,7 @@ private:
         deliver(frame.container);
     }
 
+    /// @brief 释放栈里所有未完成的容器、待写入键与根值（失败路径与析构共用）。
     void reset()
     {
         for (Frame& frame : m_stack) {
