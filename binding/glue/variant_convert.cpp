@@ -8,3 +8,21 @@ return vpy::toPython(%in);
 // @snippet variant-from-python
 vpy::fromPython(%in, %out);
 // @snippet variant-from-python
+
+// VariantMap：不手写逐元素递归，委托给 shiboken 内置的
+// std::unordered_map<std::string, vt::Variant> 容器转换器；
+// 元素再回调 vt::Variant 的转换规则，天然递归。
+
+// @snippet variantmap-to-python
+std::unordered_map<std::string, vt::Variant> map;
+map.reserve(%in.size());
+for (const auto& kv : %in)
+    map.emplace(kv.first, kv.second);
+return %CONVERTTOPYTHON[std::unordered_map<std::string, vt::Variant>](map);
+// @snippet variantmap-to-python
+
+// @snippet variantmap-from-python
+std::unordered_map<std::string, vt::Variant> map =
+    %CONVERTTOCPP[std::unordered_map<std::string, vt::Variant>](%in);
+%out = vt::VariantMap(std::move(map));
+// @snippet variantmap-from-python

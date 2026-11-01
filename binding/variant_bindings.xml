@@ -28,6 +28,90 @@
         </inject-code>
     </add-function>
 
+    <!-- ====== 实验：Variant 作为 primitive-type ======
+         目标：让函数签名直接写 vt::Variant，Python 侧仍是原生 dict/list。
+         递归在 vpy::toPython/fromPython 内部完成；这里只暴露转换入口。
+         转换类别使用 shiboken 内置类别，SbkObject 分支限定为已注册类型。 -->
+    <primitive-type name="vt::Variant" target-lang-api-name="PyObject">
+        <include file-name="vt/variant.h" location="local"/>
+        <include file-name="variant_python.h" location="local"/>
+        <conversion-rule>
+            <native-to-target file="glue/variant_convert.cpp" snippet="variant-to-python"/>
+            <target-to-native>
+                <add-conversion type="Py_None" check="%in == Py_None"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                <add-conversion type="PyBool" check="PyBool_Check(%in)"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                <add-conversion type="PyLong" check="PyLong_Check(%in)"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                <add-conversion type="PyFloat" check="PyFloat_Check(%in)"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                <add-conversion type="PyUnicode" check="PyUnicode_Check(%in)"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                <add-conversion type="PyList" check="PyList_Check(%in)"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                <add-conversion type="PyTuple" check="PyTuple_Check(%in)"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                <add-conversion type="PyDict" check="PyDict_Check(%in)"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                <add-conversion type="SbkObject" check="vpy::isRegisteredObject(%in)"
+                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+            </target-to-native>
+        </conversion-rule>
+    </primitive-type>
+
+    <!-- VariantMap 作为 primitive-type：内部委托给 shiboken 内置的
+         std::unordered_map<std::string, vt::Variant> 转换器，不手写逐元素递归。 -->
+    <primitive-type name="vt::VariantMap" target-lang-api-name="PyObject">
+        <include file-name="vt/variant_map.h" location="local"/>
+        <conversion-rule>
+            <native-to-target file="glue/variant_convert.cpp" snippet="variantmap-to-python"/>
+            <target-to-native>
+                <add-conversion type="PyDict" check="PyDict_Check(%in)"
+                                file="glue/variant_convert.cpp" snippet="variantmap-from-python"/>
+            </target-to-native>
+        </conversion-rule>
+    </primitive-type>
+
+    <!-- 实验函数：真实 C++ 签名，Python 传 dict/list 自动转。 -->
+    <add-function signature="echo(const vt::Variant&amp;)">
+        <inject-code class="target" position="beginning">
+            PyObject *pyResult{};
+            auto cppResult = echo(cppArg0);
+            pyResult = %CONVERTTOPYTHON[vt::Variant](cppResult);
+            return pyResult;
+        </inject-code>
+    </add-function>
+
+    <add-function signature="echoMap(const vt::VariantMap&amp;)">
+        <inject-code class="target" position="beginning">
+            PyObject *pyResult{};
+            auto cppResult = echoMap(cppArg0);
+            pyResult = %CONVERTTOPYTHON[vt::VariantMap](cppResult);
+            return pyResult;
+        </inject-code>
+    </add-function>
+
+    <!-- 容器类型没有单独注册：依赖 shiboken 内置的 vector / unordered_map 转换器，
+         元素转换复用上面的 vt::Variant 规则。 -->
+    <add-function signature="echoVector(const std::vector&lt;vt::Variant&gt;&amp;)">
+        <inject-code class="target" position="beginning">
+            PyObject *pyResult{};
+            auto cppResult = echoVector(cppArg0);
+            pyResult = %CONVERTTOPYTHON[std::vector&lt;vt::Variant&gt;](cppResult);
+            return pyResult;
+        </inject-code>
+    </add-function>
+
+    <add-function signature="echoUnorderedMap(const std::unordered_map&lt;std::string, vt::Variant&gt;&amp;)">
+        <inject-code class="target" position="beginning">
+            PyObject *pyResult{};
+            auto cppResult = echoUnorderedMap(cppArg0);
+            pyResult = %CONVERTTOPYTHON[std::unordered_map&lt;std::string, vt::Variant&gt;](cppResult);
+            return pyResult;
+        </inject-code>
+    </add-function>
+
     <!-- ====== 全局函数 ====== -->
 
     <add-function signature="initTypes()">

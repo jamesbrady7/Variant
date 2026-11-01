@@ -46,6 +46,22 @@ vt::Variant echo(const vt::Variant& value)
     return value;
 }
 
+vt::VariantMap echoMap(const vt::VariantMap& value)
+{
+    return value;
+}
+
+std::vector<vt::Variant> echoVector(const std::vector<vt::Variant>& value)
+{
+    return value;
+}
+
+std::unordered_map<std::string, vt::Variant>
+echoUnorderedMap(const std::unordered_map<std::string, vt::Variant>& value)
+{
+    return value;
+}
+
 std::string describeValue(const vt::Variant& value)
 {
     return vt::describe(value);
