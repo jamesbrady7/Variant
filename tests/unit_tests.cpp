@@ -46,6 +46,10 @@ struct Probe {
 
 struct Wrong {};
 
+struct Keyed {
+    int id = 0;
+};
+
 bool throwsCode(const std::function<void()>& fn, vt::VariantErrorCode expected)
 {
     try {
@@ -540,6 +544,20 @@ void testNestedContainers()
     CHECK(vt::detail::findNormalizer(std::type_index(typeid(std::map<std::string, int>)))
           == nullptr);
     CHECK(vt::detail::findNormalizer(std::type_index(typeid(Probe))) == nullptr);
+
+    // 7.5) 指针键 map：键不可字符串化 -> 自动退化成 [[k,v], ...]，键保留身份。
+    Keyed first{1};
+    Keyed second{2};
+    const std::map<Keyed*, int> pointerMap{{&first, 10}, {&second, 20}};
+    vt::Variant pointerVar = vt::Variant::fromValue(pointerMap);
+    CHECK(pointerVar.isExtension());
+    const vt::Variant normalized = vt::detail::normalizeToVariant(pointerMap);
+    CHECK(normalized.isList());                       // 不是 Map，键类型没丢
+    CHECK_EQ(normalized.asList().size(), std::size_t(2));
+    CHECK(normalized.asList()[0].isList());           // [键, 值]
+    auto pointerBack = vt::getAs<std::map<Keyed*, int>>(pointerVar);
+    CHECK(pointerBack.has_value());
+    CHECK_EQ(pointerBack->at(&second), 20);           // 指针原样还原
 
     // 8) 归一化只用于转换，不改写存储：扩展槽里仍是原对象。
     CHECK(vt::detail::normalizeToVariant(grid).isList());
