@@ -78,7 +78,7 @@ bool registerMyTypes()
 ## 硬约束
 
 - 必须在包含 `Python.h` 之前 `#undef Py_LIMITED_API`（`variant_python.h` 已处理）；
-- 绑定目标只能 **Release / RelWithDebInfo** 构建（官方 Python 无 `python39_d.lib`）；
+- 绑定目标只能 **Release / RelWithDebInfo** 构建（官方 Python 无 `pythonXY_d.lib`）；
 - 自定义 primitive-type 的 target-to-native 必须留 `check="true"` 兜底分支，
   否则参数不匹配会触发 shiboken 的 `seterror_argument did not receive a result` fatal；
 - 绑定类（`object-type`/`value-type`）必须放在全局命名空间；

@@ -7,9 +7,11 @@
 #include <QString>
 #include <QStringList>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -20,24 +22,36 @@ using namespace vt::literals;
 
 volatile std::int64_t g_sink = 0;
 
+// 单次计时受调度/频率波动影响太大：每个场景跑 3 轮取最快一轮。
+// 比较两列时两侧用同一规则，倍率才有意义。
+constexpr int kTimingRounds = 3;
+
 template <class Fn>
 double nsPerOp(std::size_t iters, Fn&& fn)
 {
-    const auto t0 = std::chrono::steady_clock::now();
-    fn(iters);
-    const auto t1 = std::chrono::steady_clock::now();
-    const double ns = std::chrono::duration<double, std::nano>(t1 - t0).count();
-    return ns / static_cast<double>(iters);
+    double best = std::numeric_limits<double>::max();
+    for (int round = 0; round < kTimingRounds; ++round) {
+        const auto t0 = std::chrono::steady_clock::now();
+        fn(iters);
+        const auto t1 = std::chrono::steady_clock::now();
+        const double ns = std::chrono::duration<double, std::nano>(t1 - t0).count();
+        best = std::min(best, ns / static_cast<double>(iters));
+    }
+    return best;
 }
 
 template <class Fn>
 double msPerOp(std::size_t reps, Fn&& fn)
 {
-    const auto t0 = std::chrono::steady_clock::now();
-    fn(reps);
-    const auto t1 = std::chrono::steady_clock::now();
-    const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    return ms / static_cast<double>(reps);
+    double best = std::numeric_limits<double>::max();
+    for (int round = 0; round < kTimingRounds; ++round) {
+        const auto t0 = std::chrono::steady_clock::now();
+        fn(reps);
+        const auto t1 = std::chrono::steady_clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        best = std::min(best, ms / static_cast<double>(reps));
+    }
+    return best;
 }
 
 void row(const char* name, double vt, double qt)
@@ -474,6 +488,7 @@ int main()
 
     std::printf("\nsink=%lld\n", static_cast<long long>(g_sink));
     std::printf("notes:\n");
+    std::printf(" - timings are the best of %d rounds per scenario.\n", kTimingRounds);
     std::printf(" - QVariantMap is an ordered QMap; vt::VariantMap is std::unordered_map.\n");
     std::printf(" - QString is implicitly shared; vt uses std::string (deep copy).\n");
     std::printf(" - ratio = qt/vt; >1 means vt is faster.\n");

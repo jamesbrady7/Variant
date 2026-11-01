@@ -10,7 +10,7 @@
 
 // shiboken 在部分配置下会传播 Py_LIMITED_API（届时 PyTypeObject 字段不可见、
 // PyList_SET_ITEM / PyUnicode_AsUTF8AndSize 等宏缺失）。我们链接的是完整
-// python39.dll，所以在本 TU 内先抹掉它，再包含 Python 头。
+// pythonXY.dll（不启用 limited API），所以在本 TU 内先抹掉它，再包含 Python 头。
 #if defined(Py_LIMITED_API)
 #undef Py_LIMITED_API
 #endif

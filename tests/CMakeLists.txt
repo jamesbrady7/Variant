@@ -16,6 +16,11 @@ if(MSVC)
     target_compile_options(vt_serial_tests PRIVATE /utf-8 /W4 /permissive- /wd4251 /wd4275)
 endif()
 
+# 纯 C++ 测试直接交给 CTest；多配置生成器由 add_test 的 target 形式
+# 自动选中当前 --config 的产物。
+add_test(NAME vt_tests COMMAND vt_tests)
+add_test(NAME vt_serial_tests COMMAND vt_serial_tests)
+
 # 内嵌 Python 的目标：把 .pyd 与运行期 DLL 复制到 exe 旁边。
 function(vt_copy_python_runtime target)
     add_custom_command(TARGET ${target} POST_BUILD
@@ -26,11 +31,11 @@ function(vt_copy_python_runtime target)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:variant_demo>" "$<TARGET_FILE_DIR:${target}>/variant_demo.dll"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${VT_PYTHON_ROOT}/python39.dll" "$<TARGET_FILE_DIR:${target}>/python39.dll"
+            "${VT_PYTHON_DLL}" "$<TARGET_FILE_DIR:${target}>/python${VT_PYTHON_ABI}.dll"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${VT_PYTHON_ROOT}/python3.dll" "$<TARGET_FILE_DIR:${target}>/python3.dll"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${VT_PYTHON_ROOT}/Lib/site-packages/shiboken6/shiboken6.abi3.dll"
+            "${VT_PYTHON_SITELIB}/shiboken6/shiboken6.abi3.dll"
             "$<TARGET_FILE_DIR:${target}>/shiboken6.abi3.dll"
         COMMENT "Copying pyd and runtime DLLs next to ${target}")
 endfunction()
@@ -42,7 +47,7 @@ if(TARGET variant_binding)
     target_link_libraries(vt_shared_tests PRIVATE
         variant_core
         variant_demo
-        "${VT_PYTHON_ROOT}/libs/python39.lib")
+        "${VT_PYTHON_LIBRARY}")
     target_include_directories(vt_shared_tests PRIVATE
         "${VT_PYTHON_ROOT}/include"
         ${CMAKE_SOURCE_DIR}/lib/include)
@@ -63,7 +68,7 @@ if(TARGET variant_binding)
         variant_core
         variant_demo
         variant_python_bridge
-        "${VT_PYTHON_ROOT}/libs/python39.lib")
+        "${VT_PYTHON_LIBRARY}")
     target_include_directories(vt_plugin_override_test PRIVATE
         "${VT_PYTHON_ROOT}/include")
     target_compile_definitions(vt_plugin_override_test PRIVATE
@@ -73,4 +78,7 @@ if(TARGET variant_binding)
         /utf-8
         "$<$<CONFIG:Debug>:/UPy_LIMITED_API>")
     vt_copy_python_runtime(vt_plugin_override_test)
+
+    add_test(NAME vt_shared_tests COMMAND vt_shared_tests)
+    add_test(NAME vt_plugin_override_test COMMAND vt_plugin_override_test)
 endif()

@@ -66,11 +66,12 @@ shiboken_generator_create_binding(
 
 target_link_libraries(variant_binding PRIVATE variant_demo variant_python_bridge)
 
-# 生成的 wrapper 按名字链接 python39.lib，需要显式给出库目录。
+# Python import library 由顶层 CMake 按解释器版本推导（pythonXY.lib），
+# 不再写死 python39。
 if(WIN32)
     target_link_directories(variant_binding PRIVATE "${VT_PYTHON_ROOT}/libs")
-    target_link_libraries(variant_binding PRIVATE "${VT_PYTHON_ROOT}/libs/python39.lib")
 endif()
+target_link_libraries(variant_binding PRIVATE "${VT_PYTHON_LIBRARY}")
 target_include_directories(variant_binding PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/core
     ${CMAKE_CURRENT_SOURCE_DIR}/demo

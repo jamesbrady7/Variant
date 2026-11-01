@@ -26,7 +26,7 @@ root.at("missing.key"_path);                                     // 抛结构化
 | --- | --- |
 | `lib/` | `variant_core`：Variant / VariantMap / VariantList / Path / VariantDocument / TypeRegistry / JSON / 二进制 / Codec |
 | `demo/` | `variant_demo`：DemoNode（对象）/ DemoColor（值）/ SharedNode（共享）/ PluginBase（多态基类）+ 真实签名演示函数 |
-| `tests/` | 223 项核心单测 + 1821 项序列化检查 + 33 项共享所有权 + 31 项继承/虚函数检查 |
+| `tests/` | 256 项核心单测 + 1824 项序列化检查 + 33 项共享所有权 + 31 项继承/虚函数检查（CTest 5 个目标） |
 | `bench/` | 与 QVariant 的对比基准（Qt5 Core，可选） |
 | `binding/core/` | **生产内核**：Variant/VariantMap/VariantList ↔ Python 转换、注册入口、typesystem CORE 段（见 `binding/core/README.md`） |
 | `binding/demo/` | 演示专用注册与共享工厂胶水（不随生产部署） |
@@ -34,34 +34,45 @@ root.at("missing.key"_path);                                     // 抛结构化
 | `py_scripts/` | Python 往返演示 |
 | `docs/` | [使用手册](docs/使用手册.md)、[设计说明](docs/设计说明.md)、[C++ 语义与接口笔记](docs/C++知识点整理.md)、[升级说明](docs/升级说明.md) |
 
-## 构建（Windows / MSVC 2019 / 本机 Qt5 与 Python 3.9）
+## 构建（Windows / MSVC 2022 / Python 3.11 + shiboken6 6.11 / Qt5 可选）
 
 ```bash
-cmake -S . -B build -G "Visual Studio 16 2019" -A x64
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 \
+      -DVT_PYTHON_ROOT=C:/path/to/Python311 \
+      -DVT_QT_PREFIX=E:/Qt/5.15.2/msvc2019_64    # 只服务 bench，可省略
 cmake --build build --config Release
 ```
 
-可选开关：`-DVT_BUILD_TESTS=OFF`、`-DVT_BUILD_BENCH=OFF`、`-DVT_BUILD_PYTHON=OFF`。
+- 不传 `VT_PYTHON_ROOT` 时会用 `find_package(Python3)` 自动探测；
+  `pythonXY.lib` / `pythonXY.dll` 由解释器版本推导，不再写死 `python39`。
+- 可选开关：`-DVT_BUILD_TESTS=OFF`、`-DVT_BUILD_BENCH=OFF`、`-DVT_BUILD_PYTHON=OFF`。
 
 ## 运行
 
 ```bash
-build/bin/Release/vt_tests.exe          # 核心单测，退出码 = 失败数
-build/bin/Release/vt_serial_tests.exe   # JSON / 二进制 / codec 测试
-build/bin/Release/vt_shared_tests.exe   # 共享所有权（C++ runner 启动 Python 测试）
-build/bin/Release/vt_plugin_override_test.exe  # Python 继承 C++ + 虚函数 VariantMap 往返 + 释放验证（31 项）
-build/bin/Release/variant_demo_app.exe  # C++ + Python 往返演示（50 项断言）
+ctest --test-dir build -C Release --output-on-failure   # 5 个目标全绿
+```
+
+对应可执行文件（也可单独跑，退出码 = 失败数）：
+
+```bash
+build/bin/Release/vt_tests.exe            # 核心单测 256 项
+build/bin/Release/vt_serial_tests.exe     # JSON / 二进制 / codec 1824 项
+build/bin/Release/vt_shared_tests.exe     # 共享所有权（C++ runner 启动 Python 测试，33 项）
+build/bin/Release/vt_plugin_override_test.exe  # Python 继承 C++ + 虚函数往返 + 释放验证（31 项）
+build/bin/Release/variant_demo_app.exe    # C++ + Python 往返演示（50 项断言）
 
 # benchmark 需要 Qt5 的 DLL
-PATH="/d/Qt/5.15.2/msvc2019_64/bin:$PATH" build/bin/Release/vt_bench.exe
+PATH="E:/Qt/5.15.2/msvc2019_64/bin:$PATH" build/bin/Release/vt_bench.exe
 
 # Python 侧也可以直接跑
 python py_scripts/demo.py
 ```
 
-> 绑定目标只支持 **Release**：Windows 官方 Python 发行版不带 `python39_d.lib`，
+> 绑定目标只支持 **Release**：Windows 官方 Python 发行版不带 `pythonXY_d.lib`，
 > Debug 下 `_DEBUG` 会让 Python 头文件启用 `Py_DEBUG`，引用 release 库中不存在的
-> `_Py_RefTotal` 等符号。core / tests / bench 的 Debug 配置不受影响。
+> `_Py_RefTotal` 等符号。core / tests / bench 的 Debug 配置不受影响
+> （`cmake --build build --config Debug --target vt_tests vt_serial_tests`）。
 
 ## 关键设计（详见 docs）
 
@@ -69,8 +80,10 @@ python py_scripts/demo.py
   any 外再套一层 `shared_ptr`，把 MSVC 下 64 字节的 any 从对象布局里挪走
   （`sizeof(Variant)` 72 → 40）。
 - map/list 用 `shared_ptr` 间接持有并实现写时复制；**只读请用 `const` 引用**，
-  非 const 的 `asMap()` 会 detach。
-- 路径可预编译成 `vt::Path`，热循环里复用（39ns vs 281ns / 次）。
+  非 const 的 `asMap()` / `operator[]` / `at()` 会 detach。
+- 扩展类型相等：注册了 codec 时按内容比较（容器按元素），否则只比较动态类型。
+- 路径可预编译成 `vt::Path`，热循环里复用（预编译比每次解析快约 5 倍；
+  绝对值随机器变化）。
 - Python 侧不出现 `Variant` 类：C++ 函数签名直接写 `vt::Variant` / `vt::VariantMap`，
   Python 侧自动对应原生 `None/bool/int/float/str/list/dict`；标准容器
   （`vector<Variant>`、`unordered_map<string,Variant>` 等）不逐个注册，
