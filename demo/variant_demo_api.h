@@ -33,6 +33,24 @@ VT_DEMO_API vt::Variant makeBuiltinSample();
 VT_DEMO_API vt::Variant makeNestedSample();
 
 /**
+ * @brief 构造对象指针做键的映射（验证 Python 侧键保留真实类型）。
+ *
+ * `std::map<DemoNode*, std::string>`：Variant 表示是 `[[node, "..."], ...]`，
+ * 而 Python 侧是 `{DemoNode: "..."}`，键没有被字符串化。
+ * @return vt::Variant 示例根值
+ */
+VT_DEMO_API vt::Variant makeNodeKeySample();
+
+/**
+ * @brief 构造键不可哈希的映射（验证 Python 侧的响亮失败）。
+ *
+ * `std::map<std::vector<int>, int>` 的键在 Python 里是 list（不可哈希），
+ * 转成 dict 时必须抛 TypeError，不能悄悄退回字符串键。
+ * @return vt::Variant 示例根值
+ */
+VT_DEMO_API vt::Variant makeUnhashableKeySample();
+
+/**
  * @brief 原样返回传入的 Variant（用于跨语言往返测试）。
  * @param [in] vt::Variant 值
  * @return vt::Variant 同一个值

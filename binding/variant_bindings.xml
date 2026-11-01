@@ -128,6 +128,20 @@
         </inject-code>
     </add-function>
 
+    <add-function signature="makeNodeKeySample()">
+        <inject-code class="target" position="beginning">
+            auto cppResult = makeNodeKeySample();
+            return %CONVERTTOPYTHON[vt::Variant](cppResult);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="makeUnhashableKeySample()">
+        <inject-code class="target" position="beginning">
+            auto cppResult = makeUnhashableKeySample();
+            return %CONVERTTOPYTHON[vt::Variant](cppResult);
+        </inject-code>
+    </add-function>
+
     <add-function signature="echo(const vt::Variant&amp;)">
         <inject-code class="target" position="beginning">
             auto cppResult = echo(cppArg0);

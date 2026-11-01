@@ -61,6 +61,280 @@ const Hook* findHookForObject(PyObject* py)
     return nullptr;
 }
 
+/// @brief 扩展槽里没法转换时统一的报错文案。
+void setUnconvertibleTypeError(const char* typeName)
+{
+    PyErr_Format(PyExc_TypeError,
+                 "vt::Variant holds '%s' but no Python converter is registered "
+                 "(custom types need vpy::register*Type; containers register "
+                 "automatically when passed to Variant::fromValue, or call "
+                 "vt::registerContainerAdapters<T>)",
+                 typeName ? typeName : "<unknown>");
+}
+
+/**
+ * @brief 把 `visitValue` 的事件流直接构造成 Python 对象。
+ *
+ * 与 `vt::detail::VariantSink` 的区别：映射键保留真实类型
+ * （`map<int,int>` -> `{7: 2}`，而不是 `{"7": 2}`），因为 Python dict
+ * 支持任意 hashable 键；Variant 只有字符串键，所以那条路必须先字符串化。
+ *
+ * 键不可哈希时**响亮失败**（保留 Python 的 TypeError），不悄悄退回字符串键。
+ */
+class PySink final : public vt::detail::ValueSink {
+public:
+    PySink() = default;
+    ~PySink() override { reset(); }
+
+    /// @brief 取出结果（新引用）；失败返回 nullptr 并保留 PyErr。
+    PyObject* take()
+    {
+        if (m_failed) {
+            if (!PyErr_Occurred())
+                PyErr_SetString(PyExc_RuntimeError, "vt: Python conversion failed");
+            reset();
+            return nullptr;
+        }
+        if (!m_root) {
+            reset();
+            Py_INCREF(Py_None);
+            return Py_None;   // 空事件流视作 Null
+        }
+        PyObject* result = m_root;
+        m_root = nullptr;
+        reset();
+        return result;
+    }
+
+    void onNull() override
+    {
+        if (m_failed)
+            return;
+        Py_INCREF(Py_None);
+        deliver(Py_None);
+    }
+
+    void onBool(bool value) override { deliverNew(PyBool_FromLong(value ? 1 : 0)); }
+    void onInt(std::int64_t value) override { deliverNew(PyLong_FromLongLong(value)); }
+    void onDouble(double value) override { deliverNew(PyFloat_FromDouble(value)); }
+
+    void onString(std::string_view value) override
+    {
+        deliverNew(PyUnicode_DecodeUTF8(value.data(), static_cast<Py_ssize_t>(value.size()),
+                                        "strict"));
+    }
+
+    void onVariant(const vt::Variant& value) override
+    {
+        if (m_failed)
+            return;
+        deliverNew(toPython(value));   // 已经是 Variant 的值沿用既有转换
+    }
+
+    void onExtension(const std::any& any) override;
+
+    void onListBegin(std::size_t size) override
+    {
+        if (m_failed)
+            return;
+        PyObject* list = PyList_New(static_cast<Py_ssize_t>(size));
+        if (!list) {
+            m_failed = true;
+            return;
+        }
+        m_stack.push_back(Frame{list, false, nullptr, 0});
+    }
+
+    void onListEnd() override { closeFrame(); }
+
+    vt::detail::MapKeyForm onMapBegin(std::size_t, bool) override
+    {
+        // 永远要真实键：Python dict 能容纳 int / 字符串 / 可哈希对象。
+        if (m_failed)
+            return vt::detail::MapKeyForm::Typed;
+        PyObject* dict = PyDict_New();
+        if (!dict) {
+            m_failed = true;
+            return vt::detail::MapKeyForm::Typed;
+        }
+        m_stack.push_back(Frame{dict, true, nullptr, 0});
+        return vt::detail::MapKeyForm::Typed;
+    }
+
+    void onMapEnd() override { closeFrame(); }
+
+    void onEntryBegin() override {}
+
+    void onEntryEnd() override
+    {
+        // 正常情况下键已被值消费；残留说明事件流不完整，直接释放。
+        if (!m_stack.empty() && m_stack.back().key) {
+            Py_DECREF(m_stack.back().key);
+            m_stack.back().key = nullptr;
+        }
+    }
+
+private:
+    struct Frame {
+        PyObject* container = nullptr;   ///< 正在构建的 list / dict（新引用）
+        bool isDict = false;
+        PyObject* key = nullptr;         ///< dict 的待写入键（新引用）
+        Py_ssize_t index = 0;            ///< list 的写入位置
+    };
+
+    void deliverNew(PyObject* obj)
+    {
+        if (m_failed) {
+            Py_XDECREF(obj);
+            return;
+        }
+        if (!obj) {
+            m_failed = true;
+            return;
+        }
+        deliver(obj);
+    }
+
+    /// @brief 把 obj（接管所有权）放进当前容器 / 作为根值。
+    void deliver(PyObject* obj)
+    {
+        if (m_stack.empty()) {
+            Py_XDECREF(m_root);
+            m_root = obj;
+            return;
+        }
+        Frame& frame = m_stack.back();
+        if (!frame.isDict) {
+            PyList_SET_ITEM(frame.container, frame.index++, obj);   // 窃取引用
+            return;
+        }
+        if (!frame.key) {
+            if (PyObject_Hash(obj) == -1) {
+                // 不可哈希的键（例如某些 shiboken wrapper）：如实报错，
+                // 不退回字符串键——那会把类型错误藏进数据里。
+                Py_DECREF(obj);
+                m_failed = true;
+                return;
+            }
+            frame.key = obj;
+            return;
+        }
+        const int rc = PyDict_SetItem(frame.container, frame.key, obj);
+        Py_DECREF(frame.key);
+        Py_DECREF(obj);
+        frame.key = nullptr;
+        if (rc != 0)
+            m_failed = true;
+    }
+
+    void closeFrame()
+    {
+        if (m_failed || m_stack.empty())
+            return;
+        const Frame frame = m_stack.back();
+        m_stack.pop_back();
+        Py_XDECREF(frame.key);   // 不完整的 dict 条目
+        deliver(frame.container);
+    }
+
+    void reset()
+    {
+        for (Frame& frame : m_stack) {
+            Py_XDECREF(frame.container);
+            Py_XDECREF(frame.key);
+        }
+        m_stack.clear();
+        Py_XDECREF(m_root);
+        m_root = nullptr;
+    }
+
+    std::vector<Frame> m_stack;
+    PyObject* m_root = nullptr;
+    bool m_failed = false;
+};
+
+void PySink::onExtension(const std::any& any)
+{
+    if (m_failed)
+        return;
+
+    if (const Hook* hook = findHookByType(any.type()); hook && hook->toPython) {
+        deliverNew(hook->toPython(any, hook->className.c_str()));
+        return;
+    }
+
+    // 容器（vector/map/set/pair/array 及其嵌套）：自动登记的归一化函数
+    // 把扩展槽展开成事件流，键按原类型交给本 sink。
+    if (vt::detail::NormalizerFn normalizer = vt::detail::findNormalizer(any.type())) {
+        try {
+            normalizer(any, *this);
+        } catch (const std::exception& e) {
+            PyErr_SetString(PyExc_RuntimeError, e.what());
+            m_failed = true;
+        } catch (...) {
+            PyErr_SetString(PyExc_RuntimeError, "vt: container normalization failed");
+            m_failed = true;
+        }
+        return;
+    }
+
+    setUnconvertibleTypeError(vt::Variant::fromValue(std::any(any)).typeName().c_str());
+    m_failed = true;
+}
+
+/**
+ * @brief `canConvertToPython` 的遍历器：只判断可转换性，不构造 Python 对象。
+ *
+ * 注意：映射键是否可哈希无法在不构造对象的前提下判断，这里按"可哈希"处理
+ * （真正的失败会在 `toPython` 里响亮报错）。
+ */
+class ConvertCheckSink final : public vt::detail::ValueSink {
+public:
+    bool ok() const { return m_ok; }
+
+    void onNull() override {}
+    void onBool(bool) override {}
+    void onInt(std::int64_t) override {}
+    void onDouble(double) override {}
+    void onString(std::string_view) override {}
+
+    void onVariant(const vt::Variant& value) override
+    {
+        if (m_ok && !canConvertToPython(value))
+            m_ok = false;
+    }
+
+    void onExtension(const std::any& any) override
+    {
+        if (!m_ok)
+            return;
+        if (findHookByType(any.type()))
+            return;
+        if (vt::detail::NormalizerFn normalizer = vt::detail::findNormalizer(any.type())) {
+            try {
+                normalizer(any, *this);
+            } catch (...) {
+                m_ok = false;
+            }
+            return;
+        }
+        m_ok = false;
+    }
+
+    void onListBegin(std::size_t) override {}
+    void onListEnd() override {}
+    vt::detail::MapKeyForm onMapBegin(std::size_t, bool) override
+    {
+        return vt::detail::MapKeyForm::Typed;
+    }
+    void onMapEnd() override {}
+    void onEntryBegin() override {}
+    void onEntryEnd() override {}
+
+private:
+    bool m_ok = true;
+};
+
 } // namespace
 
 bool addHook(Hook hook)
@@ -204,18 +478,11 @@ bool canConvertToPython(const vt::Variant& value)
         const std::any* any = value.extensionAny();
         if (!any)
             return true;
-        // 容器类型：自动登记的归一化函数能把扩展槽展开成普通 List/Map，
-        // 之后按普通结构递归检查即可。
-        if (vt::detail::NormalizerFn normalizer = vt::detail::findNormalizer(any->type())) {
-            try {
-                vt::detail::VariantSink sink;
-                normalizer(*any, sink);
-                return canConvertToPython(sink.take());
-            } catch (...) {
-                return false;
-            }
-        }
-        return findHookByType(any->type()) != nullptr;
+        // 容器类型：自动登记的归一化函数把扩展槽展开成事件流，
+        // 由 ConvertCheckSink 逐叶子判断（不构造 Python 对象）。
+        ConvertCheckSink sink;
+        sink.onExtension(*any);
+        return sink.ok();
     }
     }
     return false;
@@ -246,25 +513,18 @@ PyObject* toPython(const vt::Variant& value)
             if (!any)
                 Py_RETURN_NONE;
             const Hook* hook = findHookByType(any->type());
-            if (!hook || !hook->toPython) {
-                // 容器类型（vector/map/set/pair/array 及其嵌套）无需注册 hook：
-                // fromValue 时自动登记的归一化函数把扩展槽展开成普通 List/Map，
-                // 再按同一套规则递归转换。
-                if (vt::detail::NormalizerFn normalizer =
-                        vt::detail::findNormalizer(any->type())) {
-                    vt::detail::VariantSink sink;
-                    normalizer(*any, sink);
-                    return toPython(sink.take());
-                }
-                PyErr_Format(PyExc_TypeError,
-                             "vt::Variant holds '%s' but no Python converter is registered "
-                             "(custom types need vpy::register*Type; containers register "
-                             "automatically when passed to Variant::fromValue, or call "
-                             "vt::registerContainerAdapters<T>)",
-                             value.typeName().c_str());
+            // 容器类型（vector/map/set/pair/array 及其嵌套）无需注册 hook：
+            // fromValue 时自动登记的归一化函数把扩展槽展开成事件流。
+            if ((!hook || !hook->toPython) &&
+                !vt::detail::findNormalizer(any->type())) {
+                setUnconvertibleTypeError(value.typeName().c_str());
                 return nullptr;
             }
-            return hook->toPython(*any, hook->className.c_str());
+            // 统一交给 PySink：hook / 归一化都在同一处，
+            // 容器映射的键保留真实类型（map<int,int> -> {7: 2}）。
+            PySink sink;
+            sink.onExtension(*any);
+            return sink.take();
         }
         }
     } catch (const std::exception& e) {

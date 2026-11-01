@@ -1,11 +1,13 @@
 #include "variant_demo_api.h"
 
+#include "demo_types.h"
 #include "vt/adapters.h"
 #include "vt/debug.h"
 #include "vt/variant_list.h"
 #include "vt/variant_map.h"
 
 #include <map>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -58,6 +60,38 @@ vt::Variant makeNestedSample()
         std::map<int, std::vector<std::string>>{{7, {"a", "b"}}, {8, {"c"}}});
     root["pairs"] = vt::Variant::fromValue(
         std::vector<std::pair<int, std::string>>{{1, "one"}, {2, "two"}});
+    return vt::Variant(std::move(root));
+}
+
+vt::Variant makeNodeKeySample()
+{
+    // 节点必须和进程同寿：Python 侧 dict 的键是指向这些 C++ 对象的包装器。
+    static const std::vector<std::unique_ptr<DemoNode>> nodes = [] {
+        std::vector<std::unique_ptr<DemoNode>> result;
+        result.push_back(std::make_unique<DemoNode>(1, "alpha"));
+        result.push_back(std::make_unique<DemoNode>(2, "beta"));
+        return result;
+    }();
+
+    const std::map<DemoNode*, std::string> byNode{
+        {nodes[0].get(), "first"},
+        {nodes[1].get(), "second"},
+    };
+
+    vt::VariantMap root;
+    root["by_node"] = vt::Variant::fromValue(byNode);
+    return vt::Variant(std::move(root));
+}
+
+vt::Variant makeUnhashableKeySample()
+{
+    const std::map<std::vector<int>, int> byList{
+        {{1, 2}, 3},
+        {{4}, 5},
+    };
+
+    vt::VariantMap root;
+    root["by_list"] = vt::Variant::fromValue(byList);
     return vt::Variant(std::move(root));
 }
 

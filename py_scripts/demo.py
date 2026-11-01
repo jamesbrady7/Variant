@@ -121,8 +121,9 @@ def run():
     check(builtins["ints"] == [1, 2, 3], "vector<int> -> list")
     check(builtins["strings"] == ["a", "b"], "vector<string> -> list")
     check(builtins["strmap"] == {"x": "y"}, "map<string,string> -> dict")
-    # 非字符串键按十进制字符串写出（与 JSON 的 int 键格式一致）。
-    check(builtins["intmap"] == {"1": 2, "3": 4}, "map<int,int> -> dict（键为十进制字符串）")
+    # C++ 侧知道键的真实类型，Python dict 能容纳任意 hashable 键 -> 保持 int。
+    # （JSON 侧仍写十进制字符串：JSON 规范只允许字符串成员名。）
+    check(builtins["intmap"] == {1: 2, 3: 4}, "map<int,int> -> dict（键保留 int）")
     check(vb.sumInts([4, 5, 6]) == 15, "Python list -> vector<int> 参数")
     check(vb.intMapSize({1: 2, 3: 4, 5: 6}) == 3, "Python dict[int,int] -> unordered_map 参数")
 
@@ -130,9 +131,18 @@ def run():
     check(nested["grid"] == [[1, 2], [3, 4, 5]], "vector<vector<int>> -> 嵌套 list")
     check(nested["rows"] == [{"x": 1}, {"y": 2, "z": 3}],
           "vector<map<string,int>> -> list[dict]")
-    check(nested["by_id"] == {"7": ["a", "b"], "8": ["c"]},
-          "map<int,vector<string>> -> dict[str, list]")
+    check(nested["by_id"] == {7: ["a", "b"], 8: ["c"]},
+          "map<int,vector<string>> -> dict[int, list]（键保留 int）")
     check(nested["pairs"] == [[1, "one"], [2, "two"]], "vector<pair<int,string>> -> 二元 list")
+
+    print("\n=== 5.1 映射键：C++ -> Python 保留真实类型 ===")
+    keyed = vb.makeNodeKeySample()
+    by_node = keyed["by_node"]
+    check(len(by_node) == 2, "map<DemoNode*, string> -> dict")
+    check(all(isinstance(key, DemoNode) for key in by_node), "对象键保留 DemoNode 类型")
+    check(sorted(by_node.values()) == ["first", "second"], "对象键对应的值正确")
+    expect_type_error(vb.makeUnhashableKeySample,
+                      "map<vector<int>,int> 的键在 Python 是 list（不可哈希）-> TypeError")
 
     print("\n=== 6. 错误路径：必须响亮失败 ===")
     expect_type_error(lambda: vb.echo({1, 2}), "set 不是可转换类型")
