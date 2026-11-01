@@ -37,3 +37,30 @@ std::unordered_map<std::string, vt::Variant> map =
     %CONVERTTOCPP[std::unordered_map<std::string, vt::Variant>](%in);
 %out = vt::VariantMap(std::move(map));
 // @snippet variantmap-from-python-catchall
+
+// VariantList：同理，委托给 shiboken 内置的 std::vector<vt::Variant> 转换器。
+
+// @snippet variantlist-to-python
+std::vector<vt::Variant> items;
+items.reserve(%in.size());
+for (const auto& item : %in)
+    items.push_back(item);
+return %CONVERTTOPYTHON[std::vector<vt::Variant>](items);
+// @snippet variantlist-to-python
+
+// @snippet variantlist-from-python
+std::vector<vt::Variant> items =
+    %CONVERTTOCPP[std::vector<vt::Variant>](%in);
+%out = vt::VariantList(std::move(items));
+// @snippet variantlist-from-python
+
+// @snippet variantlist-from-python-catchall
+if (!PyList_Check(%in) && !PyTuple_Check(%in)) {
+    PyErr_Format(PyExc_TypeError, "vt::VariantList requires a list or tuple, got %s",
+                 Py_TYPE(%in)->tp_name);
+    return;
+}
+std::vector<vt::Variant> items =
+    %CONVERTTOCPP[std::vector<vt::Variant>](%in);
+%out = vt::VariantList(std::move(items));
+// @snippet variantlist-from-python-catchall

@@ -2,49 +2,55 @@
 <typesystem package="variant_binding">
 
     <!-- ==================================================================
+         文件分区（生产部署只取 CORE 段）：
+           [CORE]  vt::Variant / vt::VariantMap / vt::VariantList 的转换规则
+                   + 它们对应的 C++ 文件（binding/core/）。
+                   生产部署清单见 binding/core/README.md。
+           [DEMO]  示例类型与示例函数（DemoNode/DemoColor/SharedNode/
+                   PluginBase/echo*/holdPayload...），不要带进生产。
+
          设计（见 docs/真实签名迁移计划.md）：
          - 函数签名直接写 vt::Variant / vt::VariantMap / 标准容器；
          - Python 侧看到的就是原生 dict/list/标量，不出现 PyObject 门面；
-         - 容器不逐个注册：shiboken 内置 vector/unordered_map 转换器负责
-           容器层，元素层复用下面 vt::Variant 的转换规则，天然递归；
-         - 扩展类型（DemoNode/DemoColor/std::shared_ptr<T>）的注册在
-           vpy::registerDemoTypes()，未注册时转换必须响亮失败。
+         - 容器不逐个注册：shiboken 内置 vector/unordered_map/VariantList
+           转换器负责容器层，元素层复用 Variant 规则，天然递归。
          ================================================================== -->
+
+    <!-- ============================== CORE BEGIN ============================== -->
 
     <!-- ====== vt::Variant 作为 primitive-type ======
          target-lang-api-name="PyObject" 表示 Python 侧是任意原生对象。
-         递归在 vpy::toPython/fromPython 内部完成；这里只暴露转换入口。
-         转换类别使用 shiboken 内置类别，SbkObject 分支限定为已注册类型。 -->
+         递归在 vpy::toPython/fromPython 内部完成；这里只暴露转换入口。 -->
     <primitive-type name="vt::Variant" target-lang-api-name="PyObject">
         <include file-name="vt/variant.h" location="local"/>
         <include file-name="variant_python.h" location="local"/>
         <conversion-rule>
-            <native-to-target file="glue/variant_convert.cpp" snippet="variant-to-python"/>
+            <native-to-target file="core/glue/variant_convert.cpp" snippet="variant-to-python"/>
             <target-to-native>
                 <add-conversion type="Py_None" check="%in == Py_None"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <add-conversion type="PyBool" check="PyBool_Check(%in)"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <add-conversion type="PyLong" check="PyLong_Check(%in)"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <add-conversion type="PyFloat" check="PyFloat_Check(%in)"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <add-conversion type="PyUnicode" check="PyUnicode_Check(%in)"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <add-conversion type="PyList" check="PyList_Check(%in)"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <add-conversion type="PyTuple" check="PyTuple_Check(%in)"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <add-conversion type="PyDict" check="PyDict_Check(%in)"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <add-conversion type="SbkObject" check="vpy::isRegisteredObject(%in)"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
                 <!-- 兜底：任何对象都进入转换函数，由 fromPython 给出明确的
                      TypeError。没有这一条时，未匹配的类型会让 shiboken 走
                      returnWrongArguments，而它解析不了 "vt.Variant" 签名，
                      会直接 fatal（seterror_argument did not receive a result）。 -->
                 <add-conversion type="PyObject" check="true"
-                                file="glue/variant_convert.cpp" snippet="variant-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variant-from-python"/>
             </target-to-native>
         </conversion-rule>
     </primitive-type>
@@ -56,16 +62,38 @@
     <primitive-type name="vt::VariantMap" target-lang-api-name="PyObject">
         <include file-name="vt/variant_map.h" location="local"/>
         <conversion-rule>
-            <native-to-target file="glue/variant_convert.cpp" snippet="variantmap-to-python"/>
+            <native-to-target file="core/glue/variant_convert.cpp" snippet="variantmap-to-python"/>
             <target-to-native>
                 <add-conversion type="PyDict" check="PyDict_Check(%in)"
-                                file="glue/variant_convert.cpp" snippet="variantmap-from-python"/>
+                                file="core/glue/variant_convert.cpp" snippet="variantmap-from-python"/>
                 <!-- 兜底：同 vt::Variant，避免重载解析失败时 shiboken fatal。 -->
                 <add-conversion type="PyObject" check="true"
-                                file="glue/variant_convert.cpp" snippet="variantmap-from-python-catchall"/>
+                                file="core/glue/variant_convert.cpp" snippet="variantmap-from-python-catchall"/>
             </target-to-native>
         </conversion-rule>
     </primitive-type>
+
+    <!-- ====== vt::VariantList 作为 primitive-type ======
+         同 VariantMap：委托给 shiboken 内置的 std::vector<vt::Variant> 转换器。
+         list 与 tuple 都接受（tuple 读入后变 list）。 -->
+    <primitive-type name="vt::VariantList" target-lang-api-name="PyObject">
+        <include file-name="vt/variant_list.h" location="local"/>
+        <conversion-rule>
+            <native-to-target file="core/glue/variant_convert.cpp" snippet="variantlist-to-python"/>
+            <target-to-native>
+                <add-conversion type="PyList" check="PyList_Check(%in)"
+                                file="core/glue/variant_convert.cpp" snippet="variantlist-from-python"/>
+                <add-conversion type="PyTuple" check="PyTuple_Check(%in)"
+                                file="core/glue/variant_convert.cpp" snippet="variantlist-from-python"/>
+                <add-conversion type="PyObject" check="true"
+                                file="core/glue/variant_convert.cpp" snippet="variantlist-from-python-catchall"/>
+            </target-to-native>
+        </conversion-rule>
+    </primitive-type>
+
+    <!-- =============================== CORE END =============================== -->
+
+    <!-- ============================== DEMO BEGIN ============================== -->
 
     <!-- ====== 全局函数（真实 C++ 签名） ====== -->
 
@@ -104,6 +132,13 @@
         <inject-code class="target" position="beginning">
             auto cppResult = echoMap(cppArg0);
             return %CONVERTTOPYTHON[vt::VariantMap](cppResult);
+        </inject-code>
+    </add-function>
+
+    <add-function signature="echoList(const vt::VariantList&amp;)">
+        <inject-code class="target" position="beginning">
+            auto cppResult = echoList(cppArg0);
+            return %CONVERTTOPYTHON[vt::VariantList](cppResult);
         </inject-code>
     </add-function>
 
@@ -192,5 +227,7 @@
     <!-- 虚函数 evaluate() 的输入/输出：值类型，Python <-> C++ 按值拷贝往返。 -->
     <value-type name="PluginRequest"/>
     <value-type name="PluginResult"/>
+
+    <!-- =============================== DEMO END =============================== -->
 
 </typesystem>

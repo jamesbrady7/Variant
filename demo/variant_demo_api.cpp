@@ -66,6 +66,24 @@ echoUnorderedMap(const std::unordered_map<std::string, vt::Variant>& value)
     return value;
 }
 
+vt::VariantList echoList(const vt::VariantList& value)
+{
+    return value;
+}
+
+int sumInts(const std::vector<int>& values)
+{
+    long long total = 0;
+    for (int number : values)
+        total += number;
+    return static_cast<int>(total);
+}
+
+int intMapSize(const std::unordered_map<int, int>& values)
+{
+    return static_cast<int>(values.size());
+}
+
 std::string describeValue(const vt::Variant& value)
 {
     return vt::describe(value);

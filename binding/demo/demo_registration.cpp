@@ -1,6 +1,6 @@
 #include "variant_python.h"
 
-#include "builtin_containers.h"
+#include "container_hooks.h"
 #include "demo_types.h"
 
 #include "vt/codec.h"

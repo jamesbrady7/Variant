@@ -69,6 +69,10 @@ def run():
     check(vb.echo(None) is None, "None 保持 None")
     check(vb.echoMap(payload) == payload, "echoMap(VariantMap) 往返")
     check(vb.echoMap({}) == {}, "空 dict 往返")
+    check(vb.echoList([1, "x", None]) == [1, "x", None], "echoList(VariantList) 往返")
+    check(vb.echoList((1, 2)) == [1, 2], "tuple 读入后变 list")
+    check(vb.echoList([]) == [], "空 list 往返")
+    expect_type_error(lambda: vb.echoList({"a": 1}), "VariantList 拒绝 dict")
 
     print("\n=== 3. 注册对象类型：身份保持 ===")
     node = DemoNode(7, "alpha")
@@ -108,6 +112,10 @@ def run():
     map_back = vb.echoUnorderedMap({"node": node, "list": [1, node]})
     check(map_back["node"] is node, "unordered_map<string,Variant> 对象身份")
     check(map_back["list"][1] is node, "map 内嵌 list 的对象身份")
+
+    list_back = vb.echoList([node, {"inner": node}])
+    check(list_back[0] is node and list_back[1]["inner"] is node,
+          "VariantList 里的扩展对象身份保持")
 
     builtins = vb.makeBuiltinSample()
     check(builtins["ints"] == [1, 2, 3], "vector<int> -> list")

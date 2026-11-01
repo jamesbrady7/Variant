@@ -28,7 +28,8 @@ root.at("missing.key"_path);                                     // 抛结构化
 | `demo/` | `variant_demo`：DemoNode（对象）/ DemoColor（值）/ SharedNode（共享）/ PluginBase（多态基类）+ 真实签名演示函数 |
 | `tests/` | 174 项核心单测 + 1812 项序列化检查 + 33 项共享所有权 + 31 项继承/虚函数检查 |
 | `bench/` | 与 QVariant 的对比基准（Qt5 Core，可选） |
-| `binding/` | shiboken 绑定 + Python 桥接（`variant_python_bridge`） |
+| `binding/core/` | **生产内核**：Variant/VariantMap/VariantList ↔ Python 转换、注册入口、typesystem CORE 段（见 `binding/core/README.md`） |
+| `binding/demo/` | 演示专用注册与共享工厂胶水（不随生产部署） |
 | `exe/` | 内嵌 Python 的 C++ runner |
 | `py_scripts/` | Python 往返演示 |
 | `docs/` | [使用手册](docs/使用手册.md)、[设计说明](docs/设计说明.md)、[C++ 语义与接口笔记](docs/C++知识点整理.md) |
@@ -49,7 +50,7 @@ build/bin/Release/vt_tests.exe          # 核心单测，退出码 = 失败数
 build/bin/Release/vt_serial_tests.exe   # JSON / 二进制 / codec 测试
 build/bin/Release/vt_shared_tests.exe   # 共享所有权（C++ runner 启动 Python 测试）
 build/bin/Release/vt_plugin_override_test.exe  # Python 继承 C++ + 虚函数 VariantMap 往返 + 释放验证（31 项）
-build/bin/Release/variant_demo_app.exe  # C++ + Python 往返演示（37 项断言）
+build/bin/Release/variant_demo_app.exe  # C++ + Python 往返演示（42 项断言）
 
 # benchmark 需要 Qt5 的 DLL
 PATH="/d/Qt/5.15.2/msvc2019_64/bin:$PATH" build/bin/Release/vt_bench.exe

@@ -1,7 +1,6 @@
-#include "builtin_containers.h"
+#include "container_hooks.h"
 
 #include "variant_python.h"
-#include "vt/adapters.h"
 
 #include <string>
 #include <unordered_map>
@@ -115,16 +114,3 @@ bool registerBuiltinContainerHooks()
 }
 
 } // namespace vpy
-
-int sumInts(const std::vector<int>& values)
-{
-    long long total = 0;
-    for (int number : values)
-        total += number;
-    return static_cast<int>(total);
-}
-
-int intMapSize(const std::unordered_map<int, int>& values)
-{
-    return static_cast<int>(values.size());
-}

@@ -2,6 +2,7 @@
 
 #include "export.h"
 #include "vt/variant.h"
+#include "vt/variant_list.h"
 #include "vt/variant_map.h"
 
 #include <string>
@@ -50,6 +51,27 @@ VT_DEMO_API std::vector<vt::Variant> echoVector(const std::vector<vt::Variant>& 
  */
 VT_DEMO_API std::unordered_map<std::string, vt::Variant> echoUnorderedMap(
     const std::unordered_map<std::string, vt::Variant>& value);
+
+/**
+ * @brief 原样返回 VariantList（验证 VariantList 直接作为函数签名）。
+ * @param [in] vt::VariantList 列表
+ * @return vt::VariantList 同一个列表
+ */
+VT_DEMO_API vt::VariantList echoList(const vt::VariantList& value);
+
+/**
+ * @brief 演示/测试：`vector<int>` 的真实签名（Python list 自动转换）。
+ * @param [in] std::vector<int> 整数序列
+ * @return int 和
+ */
+VT_DEMO_API int sumInts(const std::vector<int>& values);
+
+/**
+ * @brief 演示/测试：`unordered_map<int,int>` 的真实签名（Python dict 自动转换）。
+ * @param [in] std::unordered_map<int,int> 整数映射表
+ * @return int 元素个数
+ */
+VT_DEMO_API int intMapSize(const std::unordered_map<int, int>& values);
 
 /**
  * @brief 用 describe() 生成调试文本。

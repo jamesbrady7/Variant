@@ -1,16 +1,38 @@
-# Python 桥接库：Variant <-> Python 原生对象 + 运行时类型注册表。
+# ---------------------------------------------------------------------------
+# variant_python_core：生产内核（Variant/VariantMap/VariantList <-> Python）
+#   只依赖 variant_core + libshiboken，不含任何 demo 类型。
+#   部署清单见 binding/core/README.md。
+# ---------------------------------------------------------------------------
+add_library(variant_python_core STATIC
+    core/variant_python.cpp
+    core/container_hooks.cpp
+)
+
+target_include_directories(variant_python_core
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/core
+    PRIVATE ${VT_PYTHON_ROOT}/include
+)
+target_link_libraries(variant_python_core PUBLIC variant_core Shiboken6::libshiboken)
+target_compile_options(variant_python_core PRIVATE
+    /utf-8
+    "$<$<CONFIG:Debug>:/UPy_LIMITED_API>"
+)
+
+# ---------------------------------------------------------------------------
+# variant_python_bridge：演示专用（DemoNode/DemoColor/SharedNode/PluginBase
+#   注册 + 共享所有权工厂胶水）。生产环境不要链这个目标。
+# ---------------------------------------------------------------------------
 add_library(variant_python_bridge STATIC
-    src/variant_python.cpp
-    src/demo_registration.cpp
-    src/builtin_containers.cpp
-    src/shared_bridge.cpp
+    demo/demo_registration.cpp
+    demo/shared_bridge.cpp
 )
 
 target_include_directories(variant_python_bridge
-    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/src
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/demo
+            ${CMAKE_CURRENT_SOURCE_DIR}/core
     PRIVATE ${VT_PYTHON_ROOT}/include
 )
-target_link_libraries(variant_python_bridge PUBLIC variant_demo Shiboken6::libshiboken)
+target_link_libraries(variant_python_bridge PUBLIC variant_python_core variant_demo)
 target_compile_options(variant_python_bridge PRIVATE
     /utf-8
     "$<$<CONFIG:Debug>:/UPy_LIMITED_API>"
@@ -31,14 +53,16 @@ shiboken_generator_create_binding(
     LIBRARY_TARGET variant_core
     TYPESYSTEM_FILE ${CMAKE_CURRENT_SOURCE_DIR}/variant_bindings.xml
     HEADERS
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/builtin_containers.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/shared_bridge.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/core/container_hooks.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/demo/shared_bridge.h
         ${CMAKE_SOURCE_DIR}/demo/demo_types.h
         ${CMAKE_SOURCE_DIR}/demo/variant_demo_api.h
     GENERATED_SOURCES ${VARIANT_GEN}
     SHIBOKEN_EXTRA_OPTIONS
         -I${CMAKE_SOURCE_DIR}/lib/include
         -I${CMAKE_SOURCE_DIR}/demo
+        -I${CMAKE_CURRENT_SOURCE_DIR}/core
+        -I${CMAKE_CURRENT_SOURCE_DIR}/demo
         -I${VT_PYTHON_ROOT}/include
 )
 
@@ -49,7 +73,10 @@ if(WIN32)
     target_link_directories(variant_binding PRIVATE "${VT_PYTHON_ROOT}/libs")
     target_link_libraries(variant_binding PRIVATE "${VT_PYTHON_ROOT}/libs/python39.lib")
 endif()
-target_include_directories(variant_binding PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(variant_binding PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/demo
+)
 target_compile_options(variant_binding PRIVATE
     /utf-8
     "$<$<CONFIG:Debug>:/UPy_LIMITED_API>"
@@ -59,9 +86,9 @@ target_compile_options(variant_binding PRIVATE
 if(MSVC)
     target_compile_options(variant_binding PRIVATE
         "/FI${CMAKE_SOURCE_DIR}/lib/include/vt/variant.h"
-        "/FI${CMAKE_SOURCE_DIR}/binding/src/variant_python.h"
-        "/FI${CMAKE_SOURCE_DIR}/binding/src/shared_bridge.h"
-        "/FI${CMAKE_SOURCE_DIR}/binding/src/builtin_containers.h"
+        "/FI${CMAKE_SOURCE_DIR}/binding/core/variant_python.h"
+        "/FI${CMAKE_SOURCE_DIR}/binding/core/container_hooks.h"
+        "/FI${CMAKE_SOURCE_DIR}/binding/demo/shared_bridge.h"
         "/FI${CMAKE_SOURCE_DIR}/demo/demo_types.h"
         "/FI${CMAKE_SOURCE_DIR}/demo/variant_demo_api.h"
     )
