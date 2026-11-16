@@ -437,6 +437,27 @@ const std::vector<int>* p = cv.extensionPtr<std::vector<int>>();   // 零拷贝�
 `numeric_limits<__int64>::max`，看起来像库的错。用 `static_cast<std::uint64_t>(x)`
 或花括号 `{...}` 消除歧义。
 
+### 6.7 范围检查的写法：先转安全中间类型，再比较
+
+宽类型读到窄类型时，不要直接在混合符号/宽度上比较，按"每一步都定义良好"的顺序写：
+
+```cpp
+// uint64 -> 有符号 U
+if (u > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+    return std::nullopt;                                  // 1) 先保证能进 int64
+const auto v = static_cast<std::int64_t>(u);              // 2) 此时转换合法
+if (v > static_cast<std::int64_t>(std::numeric_limits<U>::max()))
+    return std::nullopt;                                  // 3) 目标类型上限
+return static_cast<U>(v);                                 // 4) 安全收窄
+```
+
+- 第 1 步挡掉"任何有符号类型都装不下"的值，也避开 `uint64 → int64` 在 C++20 前的
+  实现定义行为；第 3 步才是目标类型检查；
+- 源无符号 ⇒ 不需要查下限（值恒 ≥ 0）；反过来从有符号读无符号要先挡负数；
+- 比较两端用**同一类型**，别让编译器替你做符号转换（也避免 `-Wsign-compare`）；
+- 有符号目标时第 1、3 步可合并为 `u > max(U)`（因为 `max(U) ≤ INT64_MAX`），
+  分开写是为了与"有符号源"分支对称，并把中间转换的安全性写明。
+
 ---
 
 ## 7. 一页速查

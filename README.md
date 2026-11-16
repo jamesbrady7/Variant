@@ -88,6 +88,9 @@ python py_scripts/demo.py
   （`sizeof(Variant)` 72 → 40）。
 - map/list 用 `shared_ptr` 间接持有并实现写时复制；**只读请用 `const` 引用**，
   非 const 的 `asMap()` / `operator[]` / `at()` 会 detach。
+- 取值是**显式且带检查**的：`asX()` 失败抛 `VariantError`，`get<T>()` / `getAs<T>()`
+  返回 `optional`。整数两槽按范围互读；整数→浮点放行（可能丢精度）；浮点→整数、
+  字符串↔数值、bool↔int 一律拒绝——没有 QVariant 式隐式转换。
 - 扩展类型相等：注册了 codec 时按内容比较（容器按元素），否则只比较动态类型。
 - 路径可预编译成 `vt::Path`，热循环里复用（预编译比每次解析快约 5 倍；
   绝对值随机器变化）。
