@@ -421,11 +421,16 @@ const std::vector<int>* p = cv.extensionPtr<std::vector<int>>();   // 零拷贝�
 密集数组如果要交给 Python，转换后仍建议用 `array('i')` / numpy / `bytes`，
 而不是 Python `list`（每个 Python int 约 28 字节，会把省下的内存全部吃回去）。
 
-### 6.6 整型统一收口：无符号越界必须响亮失败
+### 6.6 整型分槽：Int 与 UInt 各管一半
 
-Variant 只有 Int 槽（`int64`）。所有整型构造都经过同一个 `toInt64` 收口点：
-无符号值大于 `INT64_MAX` 时抛 `VariantError(OutOfRange)`，**不做 `static_cast` 回绕**
-（回绕成负数比报错更难查）。要存完整 64 位无符号范围，就存 `std::any(uint64_t)` 扩展值。
+整型按**编译期符号性**分槽：有符号进 `Int`（`int64`），无符号进 `UInt`（`uint64`）。
+这样完整 64 位无符号范围都能装下，不需要再借扩展槽。读写规则：
+
+- `get<T>` / `is<T>`：两类槽按范围互读（负数不能当无符号、超 `INT64_MAX` 的 UInt
+  不能当有符号）；
+- `asInt()` / `asUInt()` 越界时抛 `OutOfRange`，**不做 `static_cast` 回绕**；
+- `isInt()` / `isUInt()` 按槽区分，`Variant(5u) != Variant(5)` 在类型上，
+  但 `asInt()`/`asUInt()` 都能读出 5。
 
 踩坑：`vt::Variant v(std::uint64_t(x));` 是 **most vexing parse** —— 编译器把它解析成
 "声明一个返回 Variant、参数为 `std::uint64_t` 的函数"。MSVC 报 C2751/C2059，指向

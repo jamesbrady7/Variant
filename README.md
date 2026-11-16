@@ -26,13 +26,13 @@ root.at("missing.key"_path);                                     // 抛结构化
 | --- | --- |
 | `lib/` | `variant_core`：Variant / VariantMap / VariantList / Path / VariantDocument / TypeRegistry / JSON / 二进制 / Codec |
 | `demo/` | `variant_demo`：DemoNode（对象）/ DemoColor（值）/ SharedNode（共享）/ PluginBase（多态基类）+ 真实签名演示函数 |
-| `tests/` | 256 项核心单测 + 1824 项序列化检查 + 33 项共享所有权 + 31 项继承/虚函数检查（CTest 5 个目标） |
+| `tests/` | 核心单测 + 序列化检查 + 33 项共享所有权 + 31 项继承/虚函数检查（CTest 5 个目标，具体数量见运行一节） |
 | `bench/` | 与 QVariant 的对比基准（Qt5 Core，可选） |
 | `binding/core/` | **生产内核**：Variant/VariantMap/VariantList ↔ Python 转换、注册入口、typesystem CORE 段（见 `binding/core/README.md`） |
 | `binding/demo/` | 演示专用注册与共享工厂胶水（不随生产部署） |
 | `exe/` | 内嵌 Python 的 C++ runner |
 | `py_scripts/` | Python 往返演示 |
-| `docs/` | [使用手册](docs/使用手册.md)、[设计说明](docs/设计说明.md)、[C++ 语义与接口笔记](docs/C++知识点整理.md)、[升级说明](docs/升级说明.md) |
+| `docs/` | [使用手册](docs/使用手册.md)、[设计说明](docs/设计说明.md)、[C++ 语义与接口笔记](docs/C++知识点整理.md)、[升级说明](docs/升级说明.md)、[整数符号支持改造](docs/整数符号支持改造.md) |
 
 ## 构建（Windows / MSVC 2022 / Python 3.11 + shiboken6 6.11 / Qt5 可选）
 
@@ -56,11 +56,15 @@ ctest --test-dir build -C Release --output-on-failure   # 5 个目标全绿
 对应可执行文件（也可单独跑，退出码 = 失败数）：
 
 ```bash
-build/bin/Release/vt_tests.exe            # 核心单测 256 项
-build/bin/Release/vt_serial_tests.exe     # JSON / 二进制 / codec 1824 项
+build/bin/Release/vt_tests.exe            # 核心单测
+build/bin/Release/vt_serial_tests.exe     # JSON / 二进制 / codec
 build/bin/Release/vt_shared_tests.exe     # 共享所有权（C++ runner 启动 Python 测试，33 项）
 build/bin/Release/vt_plugin_override_test.exe  # Python 继承 C++ + 虚函数往返 + 释放验证（31 项）
-build/bin/Release/variant_demo_app.exe    # C++ + Python 往返演示（50 项断言）
+build/bin/Release/variant_demo_app.exe    # C++ + Python 往返演示
+```
+
+具体水位（2026-11-16）：`vt_tests` 270、`vt_serial_tests` 1832、共享 33、
+插件 31、`py_scripts/demo.py` 52。
 
 # benchmark 需要 Qt5 的 DLL
 PATH="E:/Qt/5.15.2/msvc2019_64/bin:$PATH" build/bin/Release/vt_bench.exe
@@ -79,7 +83,7 @@ python py_scripts/demo.py
 
 ## 关键设计（详见 docs）
 
-- `std::variant` 提供 7 个内建热槽，`std::any` 作为第 8 槽承载运行时注册类型；
+- `std::variant` 提供 8 个内建热槽（含无符号 `UInt`），`std::any` 作为扩展槽承载运行时注册类型；
   any 外再套一层 `shared_ptr`，把 MSVC 下 64 字节的 any 从对象布局里挪走
   （`sizeof(Variant)` 72 → 40）。
 - map/list 用 `shared_ptr` 间接持有并实现写时复制；**只读请用 `const` 引用**，
