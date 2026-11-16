@@ -124,6 +124,8 @@ def run():
     # C++ 侧知道键的真实类型，Python dict 能容纳任意 hashable 键 -> 保持 int。
     # （JSON 侧仍写十进制字符串：JSON 规范只允许字符串成员名。）
     check(builtins["intmap"] == {1: 2, 3: 4}, "map<int,int> -> dict（键保留 int）")
+    check(builtins["uint"] == 2**64 - 1, "uint64 最大值 -> Python int（不丢精度）")
+    check(vb.echo(2**64 - 1) == 2**64 - 1, "Python int(2^64-1) -> Variant -> Python int")
     check(vb.sumInts([4, 5, 6]) == 15, "Python list -> vector<int> 参数")
     check(vb.intMapSize({1: 2, 3: 4, 5: 6}) == 3, "Python dict[int,int] -> unordered_map 参数")
 

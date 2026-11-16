@@ -341,9 +341,26 @@ void testJsonErrors()
     const vt::Variant duplicate = vt::json::read("{\"a\":1,\"a\":2}");
     CHECK_EQ(duplicate.at("a").asInt(), 2);
 
-    // 超过 int64 的整数退化为 double
+    // 超过 int64 的正整数：进 UInt 槽（完整 64 位），不退化 double
     const vt::Variant big = vt::json::read("9223372036854775808");
-    CHECK(big.isDouble());
+    CHECK(big.isUInt());
+    CHECK_EQ(big.asUInt(), std::uint64_t(1) << 63);
+
+    const vt::Variant maxUint = vt::json::read("18446744073709551615");
+    CHECK(maxUint.isUInt());
+    CHECK_EQ(maxUint.asUInt(), std::numeric_limits<std::uint64_t>::max());
+
+    // 超出 uint64 才退化 double
+    CHECK(vt::json::read("18446744073709551616").isDouble());
+
+    // UInt 两种格式往返都保留符号性
+    const vt::Variant uintValue(std::numeric_limits<std::uint64_t>::max());
+    const vt::Variant jsonBack = vt::json::read(vt::json::write(uintValue));
+    CHECK(jsonBack.isUInt());
+    CHECK_EQ(jsonBack.asUInt(), std::numeric_limits<std::uint64_t>::max());
+    const vt::Variant binaryBack = vt::binary::read(vt::binary::write(uintValue));
+    CHECK(binaryBack.isUInt());
+    CHECK_EQ(binaryBack.asUInt(), std::numeric_limits<std::uint64_t>::max());
 }
 
 void testJsonExtensions()

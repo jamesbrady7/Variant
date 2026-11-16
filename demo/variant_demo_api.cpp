@@ -6,6 +6,8 @@
 #include "vt/variant_list.h"
 #include "vt/variant_map.h"
 
+#include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -46,6 +48,7 @@ vt::Variant makeBuiltinSample()
         std::unordered_map<std::string, std::string>{{"x", "y"}});
     root["intmap"] = vt::Variant::fromValue(
         std::unordered_map<int, int>{{1, 2}, {3, 4}});
+    root["uint"] = vt::Variant(std::numeric_limits<std::uint64_t>::max());
     return vt::Variant(std::move(root));
 }
 

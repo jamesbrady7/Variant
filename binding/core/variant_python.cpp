@@ -117,8 +117,13 @@ public:
 
     /// @brief bool -> `bool`（先于 int 判断，Python 里 bool 是 int 子类）。
     void onBool(bool value) override { deliverNew(PyBool_FromLong(value ? 1 : 0)); }
-    /// @brief 整数 -> `int`。
+    /// @brief 有符号整数 -> `int`。
     void onInt(std::int64_t value) override { deliverNew(PyLong_FromLongLong(value)); }
+    /// @brief 无符号整数 -> `int`（Python int 本身不限符号位）。
+    void onUInt(std::uint64_t value) override
+    {
+        deliverNew(PyLong_FromUnsignedLongLong(value));
+    }
     /// @brief 浮点 -> `float`。
     void onDouble(double value) override { deliverNew(PyFloat_FromDouble(value)); }
 
@@ -333,6 +338,7 @@ public:
     void onNull() override {}
     void onBool(bool) override {}
     void onInt(std::int64_t) override {}
+    void onUInt(std::uint64_t) override {}
     void onDouble(double) override {}
     void onString(std::string_view) override {}
 
@@ -497,6 +503,7 @@ bool canConvertToPython(const vt::Variant& value)
     case vt::Variant::Type::Null:
     case vt::Variant::Type::Bool:
     case vt::Variant::Type::Int:
+    case vt::Variant::Type::UInt:
     case vt::Variant::Type::Double:
     case vt::Variant::Type::String:
         return true;
@@ -536,6 +543,8 @@ PyObject* toPython(const vt::Variant& value)
             return PyBool_FromLong(value.asBool() ? 1 : 0);
         case vt::Variant::Type::Int:
             return PyLong_FromLongLong(value.asInt());
+        case vt::Variant::Type::UInt:
+            return PyLong_FromUnsignedLongLong(value.asUInt());
         case vt::Variant::Type::Double:
             return PyFloat_FromDouble(value.asDouble());
         case vt::Variant::Type::String: {
@@ -591,8 +600,15 @@ bool fromPython(PyObject* py, vt::Variant& out)
         }
         if (PyLong_Check(py)) {
             const long long v = PyLong_AsLongLong(py);
-            if (v == -1 && PyErr_Occurred())
-                return false;
+            if (v == -1 && PyErr_Occurred()) {
+                // 超出 int64：正数再试 uint64（Python int 无符号位，能装下完整 64 位）。
+                PyErr_Clear();
+                const unsigned long long u = PyLong_AsUnsignedLongLong(py);
+                if (u == static_cast<unsigned long long>(-1) && PyErr_Occurred())
+                    return false;
+                out = vt::Variant(static_cast<std::uint64_t>(u));
+                return true;
+            }
             out = vt::Variant(static_cast<std::int64_t>(v));
             return true;
         }

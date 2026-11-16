@@ -38,6 +38,9 @@ void appendVariant(std::string& out, const Variant& value)
     case Variant::Type::Int:
         out += std::to_string(value.asInt());
         break;
+    case Variant::Type::UInt:
+        out += std::to_string(value.asUInt());
+        break;
     case Variant::Type::Double: {
         std::ostringstream oss;
         oss << std::setprecision(17) << value.asDouble();

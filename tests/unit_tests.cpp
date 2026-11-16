@@ -95,22 +95,32 @@ void testConstruction()
     CHECK(!big.get<int>().has_value());
     CHECK(big.get<std::int64_t>().has_value());
 
-    // 无符号越界：必须响亮失败，不静默回绕成负数
-    CHECK(throwsCode([] {
-        vt::Variant v(std::uint64_t(1) << 63);
-        (void)v;
-    }, vt::VariantErrorCode::OutOfRange));
-    CHECK(throwsCode([] {
-        vt::Variant v = vt::Variant::fromValue(std::numeric_limits<std::uint64_t>::max());
-        (void)v;
-    }, vt::VariantErrorCode::OutOfRange));
+    // 无符号：进 UInt 槽，保留完整 64 位（不再抛异常）
+    vt::Variant ubig(std::uint64_t(1) << 63);
+    CHECK(ubig.isUInt());
+    CHECK(!ubig.isInt());
+    CHECK_EQ(ubig.asUInt(), std::uint64_t(1) << 63);
+    CHECK(!ubig.get<std::int64_t>().has_value());   // 超出 int64
+    CHECK(throwsCode([&] { (void)ubig.asInt(); }, vt::VariantErrorCode::OutOfRange));
 
-    // 边界值 INT64_MAX 仍然接受
-    // 注意：Variant maxUnsigned(std::uint64_t(...)) 会被解析成函数声明（most vexing parse）
-    vt::Variant maxUnsigned(static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
-    CHECK_EQ(maxUnsigned.asInt(), std::numeric_limits<std::int64_t>::max());
-    CHECK_EQ(maxUnsigned.get<std::uint64_t>().value_or(0),
-             static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
+    vt::Variant maxUnsigned = vt::Variant::fromValue(std::numeric_limits<std::uint64_t>::max());
+    CHECK(maxUnsigned.isUInt());
+    CHECK_EQ(maxUnsigned.asUInt(), std::numeric_limits<std::uint64_t>::max());
+    CHECK_EQ(maxUnsigned.asDouble(),
+             static_cast<double>(std::numeric_limits<std::uint64_t>::max()));
+
+    // 有符号/无符号按范围互相读取
+    vt::Variant seven = 7;
+    CHECK_EQ(seven.asUInt(), std::uint64_t(7));
+    CHECK_EQ(seven.get<std::uint64_t>().value_or(0), std::uint64_t(7));
+    vt::Variant sevenU(std::uint64_t(7));
+    CHECK_EQ(sevenU.asInt(), 7);
+    CHECK_EQ(sevenU.get<int>().value_or(0), 7);
+
+    // 负数不能当无符号读
+    vt::Variant negative = -1;
+    CHECK(!negative.get<std::uint64_t>().has_value());
+    CHECK(throwsCode([&] { (void)negative.asUInt(); }, vt::VariantErrorCode::OutOfRange));
 }
 
 void testStringLikeInputs()
@@ -609,11 +619,16 @@ void testNestedContainers()
     CHECK(bitsBack.has_value());
     CHECK_EQ((*bitsBack)[2], true);
 
-    // 10) 无符号越界与 `Variant` 的整型构造同规则：不静默回绕。
+    // 10) 无符号容器：元素按 UInt 事件走，完整 64 位不丢。
     using BigUnsigned = std::vector<unsigned long long>;
-    const BigUnsigned tooBig{std::numeric_limits<unsigned long long>::max()};
-    CHECK(throwsCode([&] { (void)vt::detail::normalizeToVariant(tooBig); },
-                     vt::VariantErrorCode::OutOfRange));
+    const BigUnsigned huge{std::numeric_limits<unsigned long long>::max()};
+    const vt::Variant hugeVar = vt::detail::normalizeToVariant(huge);
+    CHECK(hugeVar.isList());
+    CHECK(hugeVar.asList()[0].isUInt());
+    CHECK_EQ(hugeVar.asList()[0].asUInt(), std::numeric_limits<std::uint64_t>::max());
+    auto hugeBack = vt::getAs<BigUnsigned>(vt::Variant::fromValue(huge));
+    CHECK(hugeBack.has_value());
+    CHECK_EQ((*hugeBack)[0], std::numeric_limits<unsigned long long>::max());
 }
 
 void testDocument()
@@ -761,6 +776,10 @@ public:
     void onNull() override { m_trace += "null;"; }
     void onBool(bool) override { m_trace += "bool;"; }
     void onInt(std::int64_t value) override { m_trace += "int:" + std::to_string(value) + ";"; }
+    void onUInt(std::uint64_t value) override
+    {
+        m_trace += "uint:" + std::to_string(value) + ";";
+    }
     void onDouble(double) override { m_trace += "double;"; }
     void onString(std::string_view value) override
     {

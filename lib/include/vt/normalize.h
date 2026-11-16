@@ -59,9 +59,12 @@ struct ValueSink {
     /// @brief bool 叶子。
     /// @param [in] bool 布尔值
     virtual void onBool(bool value) = 0;
-    /// @brief 整数叶子。
-    /// @param [in] std::int64_t 整数值（越界规则与 `Variant` 一致）
+    /// @brief 有符号整数叶子。
+    /// @param [in] std::int64_t 整数值
     virtual void onInt(std::int64_t value) = 0;
+    /// @brief 无符号整数叶子（完整的 64 位范围）。
+    /// @param [in] std::uint64_t 无符号整数值
+    virtual void onUInt(std::uint64_t value) = 0;
     /// @brief 浮点叶子。
     /// @param [in] double 浮点值
     virtual void onDouble(double value) = 0;
@@ -281,15 +284,12 @@ void visitValue(const T& value, Sink& sink)
     } else if constexpr (std::is_same_v<U, bool>) {
         sink.onBool(value);
     } else if constexpr (std::is_integral_v<U>) {
-        // 与 `Variant` 的整型构造同一条规则（无符号越界抛 OutOfRange），
-        // 但**不构造临时 Variant**——平坦容器里这是每元素一次的热路径，
-        // 多一次构造 + asInt 会让遍历比手写循环慢近一倍（bench 实测）。
-        if constexpr (std::is_unsigned_v<U>) {
-            if (value > static_cast<U>(std::numeric_limits<std::int64_t>::max()))
-                throw VariantError(VariantErrorCode::OutOfRange,
-                                   "unsigned integer exceeds int64 range");
-        }
-        sink.onInt(static_cast<std::int64_t>(value));
+        // 按符号性分事件（与 `Variant` 的整型构造同一规则），不构造临时 Variant：
+        // 平坦容器里这是每元素一次的热路径。
+        if constexpr (std::is_unsigned_v<U>)
+            sink.onUInt(static_cast<std::uint64_t>(value));
+        else
+            sink.onInt(static_cast<std::int64_t>(value));
     } else if constexpr (std::is_floating_point_v<U>) {
         sink.onDouble(static_cast<double>(value));
     } else if constexpr (std::is_same_v<U, std::string>) {
@@ -326,8 +326,10 @@ public:
     void onNull() override { emit(Variant()); }
     /// @brief bool -> Bool 槽。
     void onBool(bool value) override { emit(Variant(value)); }
-    /// @brief 整数 -> Int 槽。
+    /// @brief 有符号整数 -> Int 槽。
     void onInt(std::int64_t value) override { emit(Variant(value)); }
+    /// @brief 无符号整数 -> UInt 槽。
+    void onUInt(std::uint64_t value) override { emit(Variant(value)); }
     /// @brief 浮点 -> Double 槽。
     void onDouble(double value) override { emit(Variant(value)); }
 

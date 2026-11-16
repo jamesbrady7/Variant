@@ -68,6 +68,7 @@ const char* builtinTypeName(Variant::Type t) noexcept
     case Variant::Type::Map:       return "map";
     case Variant::Type::List:      return "list";
     case Variant::Type::Extension: return "extension";
+    case Variant::Type::UInt:      return "uint";
     }
     return "unknown";
 }
@@ -218,10 +219,32 @@ bool Variant::asBool() const
 
 std::int64_t Variant::asInt() const
 {
-    if (!isInt())
-        throw VariantError(VariantErrorCode::TypeMismatch,
-                           std::string("expected int, got ") + typeName());
-    return std::get<std::int64_t>(m_storage);
+    if (isInt())
+        return std::get<std::int64_t>(m_storage);
+    if (isUInt()) {
+        const std::uint64_t u = std::get<std::uint64_t>(m_storage);
+        if (u > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+            throw VariantError(VariantErrorCode::OutOfRange,
+                               "unsigned value exceeds int64 range");
+        return static_cast<std::int64_t>(u);
+    }
+    throw VariantError(VariantErrorCode::TypeMismatch,
+                       std::string("expected int or uint, got ") + typeName());
+}
+
+std::uint64_t Variant::asUInt() const
+{
+    if (isUInt())
+        return std::get<std::uint64_t>(m_storage);
+    if (isInt()) {
+        const std::int64_t v = std::get<std::int64_t>(m_storage);
+        if (v < 0)
+            throw VariantError(VariantErrorCode::OutOfRange,
+                               "negative value cannot be read as uint");
+        return static_cast<std::uint64_t>(v);
+    }
+    throw VariantError(VariantErrorCode::TypeMismatch,
+                       std::string("expected uint or int, got ") + typeName());
 }
 
 double Variant::asDouble() const
@@ -230,8 +253,10 @@ double Variant::asDouble() const
         return std::get<double>(m_storage);
     if (isInt())
         return static_cast<double>(std::get<std::int64_t>(m_storage));
+    if (isUInt())
+        return static_cast<double>(std::get<std::uint64_t>(m_storage));
     throw VariantError(VariantErrorCode::TypeMismatch,
-                       std::string("expected double or int, got ") + typeName());
+                       std::string("expected double, int or uint, got ") + typeName());
 }
 
 std::string Variant::asString() const
@@ -263,6 +288,8 @@ double Variant::asDoubleOr(double def) const noexcept
         return std::get<double>(m_storage);
     if (isInt())
         return static_cast<double>(std::get<std::int64_t>(m_storage));
+    if (isUInt())
+        return static_cast<double>(std::get<std::uint64_t>(m_storage));
     return def;
 }
 
@@ -615,6 +642,7 @@ bool Variant::operator==(const Variant& other) const
     case Type::Null:      return true;
     case Type::Bool:      return std::get<bool>(m_storage) == std::get<bool>(other.m_storage);
     case Type::Int:       return std::get<std::int64_t>(m_storage) == std::get<std::int64_t>(other.m_storage);
+    case Type::UInt:      return std::get<std::uint64_t>(m_storage) == std::get<std::uint64_t>(other.m_storage);
     case Type::Double:    return std::get<double>(m_storage) == std::get<double>(other.m_storage);
     case Type::String:    return std::get<std::string>(m_storage) == std::get<std::string>(other.m_storage);
     case Type::Map:       return asMap() == other.asMap();

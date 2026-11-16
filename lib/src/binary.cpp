@@ -109,6 +109,7 @@ constexpr unsigned char kTagString = 0x05;
 constexpr unsigned char kTagList = 0x06;
 constexpr unsigned char kTagMap = 0x07;
 constexpr unsigned char kTagExtension = 0x08;
+constexpr unsigned char kTagUInt = 0x09;
 constexpr unsigned char kTagNull = 0x00;
 
 constexpr unsigned char kMagic0 = 'V';
@@ -171,6 +172,10 @@ struct Writer {
         case Variant::Type::Int:
             out.push_back(static_cast<char>(kTagInt));
             appendZigZag(out, value.asInt());
+            return true;
+        case Variant::Type::UInt:
+            out.push_back(static_cast<char>(kTagUInt));
+            appendVarint(out, value.asUInt());
             return true;
         case Variant::Type::Double:
             out.push_back(static_cast<char>(kTagDouble));
@@ -357,6 +362,13 @@ struct Reader {
                 return false;
             const std::int64_t value =
                 static_cast<std::int64_t>((zz >> 1) ^ (~(zz & 1) + 1));
+            out = Variant(value);
+            return true;
+        }
+        case kTagUInt: {
+            std::uint64_t value = 0;
+            if (!readVarint(value))
+                return false;
             out = Variant(value);
             return true;
         }

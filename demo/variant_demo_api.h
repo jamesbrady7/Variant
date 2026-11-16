@@ -18,7 +18,8 @@ VT_DEMO_API vt::Variant makeSample();
 /**
  * @brief 构造一棵包含内建容器的示例树。
  *
- * 含 `vector<int>`、`vector<string>`、`map<string,string>`、`map<int,int>`。
+ * 含 `vector<int>`、`vector<string>`、`map<string,string>`、`map<int,int>`，
+ * 以及一个 `uint64_t` 最大值（验证无符号槽不被当成 double/字符串）。
  * @return vt::Variant 示例根值
  */
 VT_DEMO_API vt::Variant makeBuiltinSample();

@@ -58,7 +58,8 @@ public:
         String,    ///< std::string（UTF-8 约定）
         Map,       ///< VariantMap
         List,      ///< VariantList
-        Extension  ///< 扩展槽（std::any）
+        Extension, ///< 扩展槽（std::any）
+        UInt       ///< std::uint64_t（追加在末尾，已有类型的数值不变）
     };
 
     /// @brief 构造空值。
@@ -77,10 +78,19 @@ public:
     Variant(bool v) noexcept : m_storage(v) {}
 
     /**
-     * @brief 从 64 位整数构造。
+     * @brief 从 64 位有符号整数构造。
      * @param [in] std::int64_t 整数值
      */
     Variant(std::int64_t v) noexcept : m_storage(v) {}
+
+    /**
+     * @brief 从 64 位无符号整数构造。
+     *
+     * 无符号值进 `UInt` 槽，**不再因为超过 INT64_MAX 抛异常**；
+     * 需要当有符号读时用 `asInt()`（越界会抛 `OutOfRange`）。
+     * @param [in] std::uint64_t 无符号整数值
+     */
+    Variant(std::uint64_t v) noexcept : m_storage(v) {}
 
     /**
      * @brief 从 double 构造。
@@ -107,15 +117,14 @@ public:
     Variant(std::string v) : m_storage(std::move(v)) {}
 
     /**
-     * @brief 从任意整型构造 Int。
+     * @brief 从任意整型构造：有符号进 `Int`，无符号进 `UInt`。
      *
-     * 所有整型（含 char/short/unsigned）都落到 Int 槽；bool 被上方精确匹配拿走。
-     * 无符号值超出 int64 可表示范围时抛异常，**不静默回绕**。
-     * @param [in] T 整型
-     * @throws VariantError 无符号值大于 INT64_MAX（OutOfRange）
+     * 按 `T` 的符号性选择槽位，所以 `Variant(0u)` 与 `Variant(0)` 的类型不同；
+     * `get<int64_t>()` / `get<uint64_t>()` 两边都能按范围互相读取。
+     * @param [in] T 整型（bool 由上方精确匹配拿走）
      */
     template <class T, std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, int> = 0>
-    Variant(T v) : Variant(toInt64(v)) {}
+    Variant(T v) : Variant(integerValue(v)) {}
 
     /**
      * @brief 从 VariantMap 构造 Map（定义在 .cpp，因类型在此不完整）。
@@ -154,6 +163,8 @@ public:
     bool isBool() const noexcept { return type() == Type::Bool; }
     /// @brief 是否 Int。
     bool isInt() const noexcept { return type() == Type::Int; }
+    /// @brief 是否 UInt。
+    bool isUInt() const noexcept { return type() == Type::UInt; }
     /// @brief 是否 Double。
     bool isDouble() const noexcept { return type() == Type::Double; }
     /// @brief 是否 String。
@@ -211,11 +222,18 @@ public:
     bool asBool() const;
 
     /**
-     * @brief 严格取 int64。
+     * @brief 严格取 int64；UInt 槽中不超过 INT64_MAX 的值可隐式读取。
      * @return std::int64_t 整数值
-     * @throws VariantError 类型不符
+     * @throws VariantError 类型不符（TypeMismatch）或数值超过 INT64_MAX（OutOfRange）
      */
     std::int64_t asInt() const;
+
+    /**
+     * @brief 严格取 uint64；Int 槽中的非负值可隐式读取。
+     * @return std::uint64_t 无符号值
+     * @throws VariantError 类型不符（TypeMismatch）或 Int 为负数（OutOfRange）
+     */
+    std::uint64_t asUInt() const;
 
     /**
      * @brief 取 double；Int 可隐式转换。
@@ -285,7 +303,34 @@ public:
      * @param [in] std::int64_t 默认值
      * @return std::int64_t 整数值
      */
-    std::int64_t asIntOr(std::int64_t def) const noexcept { return isInt() ? std::get<std::int64_t>(m_storage) : def; }
+    std::int64_t asIntOr(std::int64_t def) const noexcept
+    {
+        if (isInt())
+            return std::get<std::int64_t>(m_storage);
+        if (isUInt()) {
+            const std::uint64_t u = std::get<std::uint64_t>(m_storage);
+            if (u <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+                return static_cast<std::int64_t>(u);
+        }
+        return def;
+    }
+
+    /**
+     * @brief 取 uint64；类型不符或为负数返回默认值。
+     * @param [in] std::uint64_t 默认值
+     * @return std::uint64_t 无符号值
+     */
+    std::uint64_t asUIntOr(std::uint64_t def) const noexcept
+    {
+        if (isUInt())
+            return std::get<std::uint64_t>(m_storage);
+        if (isInt()) {
+            const std::int64_t v = std::get<std::int64_t>(m_storage);
+            if (v >= 0)
+                return static_cast<std::uint64_t>(v);
+        }
+        return def;
+    }
 
     /**
      * @brief 取 double；类型不符返回默认值。
@@ -316,9 +361,9 @@ public:
         if constexpr (std::is_same_v<U, bool>) {
             return isBool();
         } else if constexpr (std::is_integral_v<U>) {
-            return isInt();
+            return isInt() || isUInt();
         } else if constexpr (std::is_floating_point_v<U>) {
-            return isDouble() || isInt();
+            return isDouble() || isInt() || isUInt();
         } else if constexpr (std::is_same_v<U, std::string>) {
             return isString();
         } else {
@@ -352,9 +397,25 @@ public:
                 }
                 return static_cast<U>(v);
             }
+            if (isUInt()) {
+                const auto u = std::get<std::uint64_t>(m_storage);
+                if constexpr (std::is_signed_v<U>) {
+                    if (u > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+                        return std::nullopt;
+                    const auto v = static_cast<std::int64_t>(u);
+                    if (v > static_cast<std::int64_t>(std::numeric_limits<U>::max()))
+                        return std::nullopt;
+                    return static_cast<U>(v);
+                } else {
+                    if (u > static_cast<std::uint64_t>(std::numeric_limits<U>::max()))
+                        return std::nullopt;
+                    return static_cast<U>(u);
+                }
+            }
         } else if constexpr (std::is_floating_point_v<U>) {
             if (isDouble()) return static_cast<U>(std::get<double>(m_storage));
             if (isInt()) return static_cast<U>(std::get<std::int64_t>(m_storage));
+            if (isUInt()) return static_cast<U>(std::get<std::uint64_t>(m_storage));
         } else if constexpr (std::is_same_v<U, std::string>) {
             if (isString()) return std::get<std::string>(m_storage);
         } else {
@@ -741,16 +802,14 @@ public:
     bool operator!=(const Variant& other) const { return !(*this == other); }
 
 private:
-    /// 整型统一的收口点：无符号越界抛 OutOfRange，避免静默回绕成负数。
+    /// 整型统一的收口点：按符号性选槽位，不做范围检查（UInt 槽能装下完整 64 位）。
     template <class T>
-    static std::int64_t toInt64(T value)
+    static auto integerValue(T value) noexcept
     {
-        if constexpr (std::is_unsigned_v<T>) {
-            if (value > static_cast<T>(std::numeric_limits<std::int64_t>::max()))
-                throw VariantError(VariantErrorCode::OutOfRange,
-                                   "unsigned integer exceeds int64 range");
-        }
-        return static_cast<std::int64_t>(value);
+        if constexpr (std::is_unsigned_v<T>)
+            return static_cast<std::uint64_t>(value);
+        else
+            return static_cast<std::int64_t>(value);
     }
 
     struct NullTag {};  ///< Null 槽的占位类型
@@ -764,7 +823,8 @@ private:
         std::string,                      ///< Type::String
         std::shared_ptr<VariantMap>,      ///< Type::Map（共享句柄，COW）
         std::shared_ptr<VariantList>,     ///< Type::List（共享句柄，COW）
-        std::shared_ptr<VariantExt>       ///< Type::Extension（内部 std::any）
+        std::shared_ptr<VariantExt>,      ///< Type::Extension（内部 std::any）
+        std::uint64_t                     ///< Type::UInt
     >;
 
     Storage m_storage{};  ///< 实际存储

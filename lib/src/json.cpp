@@ -156,6 +156,14 @@ struct JsonWriter {
             out.append(buffer, result.ptr);
             return true;
         }
+        case Variant::Type::UInt: {
+            char buffer[32];
+            const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value.asUInt());
+            if (result.ec != std::errc())
+                return fail(SerializeErrorCode::InvalidNumber, "integer formatting failed");
+            out.append(buffer, result.ptr);
+            return true;
+        }
         case Variant::Type::Double:
             return writeDouble(value.asDouble());
         case Variant::Type::String:
@@ -509,7 +517,16 @@ struct JsonParser {
             }
             if (result.ec != std::errc::result_out_of_range)
                 return fail(SerializeErrorCode::InvalidNumber, "invalid integer", start);
-            // 超出 int64：退化到 double
+            // 超出 int64：正数先试 uint64（完整 64 位无符号），再退化到 double。
+            if (*start != '-') {
+                std::uint64_t unsignedInteger = 0;
+                const auto unsignedResult =
+                    std::from_chars(start, tokenEnd, unsignedInteger);
+                if (unsignedResult.ec == std::errc() && unsignedResult.ptr == tokenEnd) {
+                    out = Variant(unsignedInteger);
+                    return true;
+                }
+            }
         }
 
         double value = 0.0;
