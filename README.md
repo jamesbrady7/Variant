@@ -32,7 +32,7 @@ root.at("missing.key"_path);                                     // 抛结构化
 | `binding/demo/` | 演示专用注册与共享工厂胶水（不随生产部署） |
 | `exe/` | 内嵌 Python 的 C++ runner |
 | `py_scripts/` | Python 往返演示 |
-| `docs/` | [使用手册](docs/使用手册.md)、[设计说明](docs/设计说明.md)、[C++ 语义与接口笔记](docs/C++知识点整理.md)、[升级说明](docs/升级说明.md)、[整数符号支持改造](docs/整数符号支持改造.md) |
+| `docs/` | [使用手册](docs/使用手册.md)、[设计说明](docs/设计说明.md)、[C++ 语义与接口笔记](docs/C++知识点整理.md)、[Python 与 C++ 互操作知识点](docs/Python与C++互操作知识点.md)、[升级说明](docs/升级说明.md)、[整数符号支持改造](docs/整数符号支持改造.md) |
 
 ## 构建（Windows / MSVC 2022 / Python 3.11 + shiboken6 6.11 / Qt5 可选）
 

@@ -409,6 +409,10 @@ private:
 
 # 3 Python 转换
 
+> 概念扫盲（`PyObject` / `PyTypeObject` / 短类名 / 引用计数 / GIL / capsule /
+> shiboken）见 [Python 与 C++ 互操作知识点](Python与C++互操作知识点.md)；
+> 本文只讲本项目的流程与设计意图。
+
 代码都在 `binding/core/variant_python.{h,cpp}`。核心只有两个方向：
 `vpy::toPython(Variant) -> PyObject*` 和 `vpy::fromPython(PyObject*, Variant&) -> bool`，
 其余都是它们的分派分支与注册进来（Hook / normalizer / codec）的叶子处理。
