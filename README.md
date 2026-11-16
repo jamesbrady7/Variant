@@ -63,8 +63,8 @@ build/bin/Release/vt_plugin_override_test.exe  # Python 继承 C++ + 虚函数�
 build/bin/Release/variant_demo_app.exe    # C++ + Python 往返演示
 ```
 
-具体水位（2026-11-16）：`vt_tests` 270、`vt_serial_tests` 1832、共享 33、
-插件 31、`py_scripts/demo.py` 52。
+具体水位（2026-11-16）：`vt_tests` 328、`vt_serial_tests` 1868、共享 33、
+插件 31、`py_scripts/demo.py` 57。
 
 # benchmark 需要 Qt5 的 DLL
 PATH="E:/Qt/5.15.2/msvc2019_64/bin:$PATH" build/bin/Release/vt_bench.exe

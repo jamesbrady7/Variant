@@ -123,6 +123,105 @@ void testConstruction()
     CHECK(throwsCode([&] { (void)negative.asUInt(); }, vt::VariantErrorCode::OutOfRange));
 }
 
+void testUnsignedIntegers()
+{
+    // 1) 槽位选择：只看符号性，不看值大小
+    CHECK(vt::Variant(0).isInt());
+    CHECK(vt::Variant(std::uint64_t(0)).isUInt());
+    CHECK(!vt::Variant(std::uint64_t(0)).isInt());
+    CHECK(vt::Variant(static_cast<std::uint8_t>(255)).isUInt());
+    CHECK(vt::Variant(static_cast<std::uint32_t>(7)).isUInt());
+    CHECK(vt::Variant(static_cast<std::size_t>(7)).isUInt());
+    CHECK(vt::Variant(static_cast<std::int8_t>(-1)).isInt());
+    CHECK(!vt::Variant(static_cast<std::int8_t>(-1)).isUInt());
+
+    // 2) 两端边界都能完整构造、完整取回
+    const vt::Variant iMin(std::numeric_limits<std::int64_t>::min());
+    const vt::Variant iMax(std::numeric_limits<std::int64_t>::max());
+    const vt::Variant uMax(std::numeric_limits<std::uint64_t>::max());
+    const vt::Variant uHigh(static_cast<std::uint64_t>(1) << 63);
+    CHECK_EQ(iMin.asInt(), std::numeric_limits<std::int64_t>::min());
+    CHECK_EQ(iMax.asInt(), std::numeric_limits<std::int64_t>::max());
+    CHECK_EQ(uMax.asUInt(), std::numeric_limits<std::uint64_t>::max());
+    CHECK_EQ(uHigh.asUInt(), static_cast<std::uint64_t>(1) << 63);
+
+    // 3) 有符号槽 <- 无符号值：放得下才可读
+    CHECK_EQ(vt::Variant(std::uint64_t(7)).asInt(), 7);
+    CHECK_EQ(vt::Variant(std::uint64_t(7)).get<int>().value_or(0), 7);
+    CHECK_EQ(vt::Variant(std::uint64_t(7)).get<std::int64_t>().value_or(0), std::int64_t(7));
+    CHECK(!uHigh.get<std::int64_t>().has_value());
+    CHECK(throwsCode([&] { (void)uHigh.asInt(); }, vt::VariantErrorCode::OutOfRange));
+
+    // 4) 无符号槽 <- 有符号值：非负且放得下才可读
+    CHECK_EQ(vt::Variant(7).asUInt(), std::uint64_t(7));
+    CHECK_EQ(vt::Variant(7).get<std::uint64_t>().value_or(0), std::uint64_t(7));
+    CHECK_EQ(iMax.asUInt(),
+             static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
+    CHECK(!vt::Variant(-1).get<std::uint64_t>().has_value());
+    CHECK(throwsCode([] { (void)vt::Variant(-1).asUInt(); },
+                     vt::VariantErrorCode::OutOfRange));
+
+    // 5) 窄类型范围检查：两个槽走同一套规则
+    CHECK(vt::Variant(std::uint64_t(200)).get<std::uint8_t>().has_value());
+    CHECK(!vt::Variant(std::uint64_t(300)).get<std::uint8_t>().has_value());
+    CHECK(!vt::Variant(std::uint64_t(200)).get<std::int8_t>().has_value());
+    CHECK(vt::Variant(std::int64_t(200)).get<std::uint8_t>().has_value());
+    CHECK(!vt::Variant(std::int64_t(300)).get<std::uint8_t>().has_value());
+    CHECK(!vt::Variant(-1).get<std::uint8_t>().has_value());
+    CHECK(!uHigh.get<std::uint32_t>().has_value());
+
+    // 6) 带默认值的读取
+    CHECK_EQ(uHigh.asIntOr(-5), -5);
+    CHECK_EQ(vt::Variant(std::uint64_t(9)).asIntOr(-5), 9);
+    CHECK_EQ(vt::Variant(-5).asUIntOr(99), std::uint64_t(99));
+    CHECK_EQ(uMax.asUIntOr(0), std::numeric_limits<std::uint64_t>::max());
+
+    // 7) 浮点视图两种槽都接受
+    CHECK_EQ(uMax.asDouble(),
+             static_cast<double>(std::numeric_limits<std::uint64_t>::max()));
+    CHECK_EQ(iMin.asDoubleOr(0.0),
+             static_cast<double>(std::numeric_limits<std::int64_t>::min()));
+    CHECK_EQ(uHigh.asDoubleOr(0.0), static_cast<double>(std::uint64_t(1) << 63));
+
+    // 8) is<T> 只回答"这类值能否表达"，不做范围检查（与 Int vs Double 的既有语义一致）
+    CHECK(uMax.is<std::int64_t>());
+    CHECK(iMax.is<std::uint64_t>());
+    CHECK(uMax.is<double>());
+    CHECK(!uMax.is<bool>());
+
+    // 9) 相等：不同槽不相等（与 Int vs Double 的严格性一致）
+    CHECK(vt::Variant(5) != vt::Variant(std::uint64_t(5)));
+    CHECK(vt::Variant(std::uint64_t(5)) == vt::Variant(std::uint64_t(5)));
+    CHECK(uMax == vt::Variant(std::numeric_limits<std::uint64_t>::max()));
+
+    // 10) 类型名与 describe
+    CHECK_EQ(vt::Variant(5).typeName(), std::string("int"));
+    CHECK_EQ(vt::Variant(std::uint64_t(5)).typeName(), std::string("uint"));
+    CHECK_EQ(vt::describe(uMax), std::string("18446744073709551615"));
+
+    // 11) 容器：元素按 UInt 事件走，回读按目标类型解析
+    const std::vector<std::uint8_t> bytes{0, 255};
+    const vt::Variant bytesVar = vt::detail::normalizeToVariant(bytes);
+    CHECK(bytesVar.isList());
+    CHECK(bytesVar.asList()[0].isUInt());
+    CHECK_EQ(bytesVar.asList()[1].asUInt(), std::uint64_t(255));
+
+    const std::map<std::uint64_t, int> byId{{std::numeric_limits<std::uint64_t>::max(), 1}};
+    const vt::Variant mapVar = vt::detail::normalizeToVariant(byId);
+    CHECK(mapVar.isMap());
+    CHECK(mapVar.asMap().contains("18446744073709551615"));
+    auto byIdBack = vt::getAs<std::map<std::uint64_t, int>>(vt::Variant::fromValue(byId));
+    CHECK(byIdBack.has_value());
+    CHECK_EQ(byIdBack->at(std::numeric_limits<std::uint64_t>::max()), 1);
+
+    // List 里 Int/UInt 混装，按 uint64 读回（值语义，不看原槽）
+    vt::VariantList mixed{vt::Variant(3), vt::Variant(std::uint64_t(4))};
+    auto mixedBack = vt::getAs<std::vector<std::uint64_t>>(vt::Variant(std::move(mixed)));
+    CHECK(mixedBack.has_value());
+    CHECK_EQ((*mixedBack)[0], std::uint64_t(3));
+    CHECK_EQ((*mixedBack)[1], std::uint64_t(4));
+}
+
 void testStringLikeInputs()
 {
     // 字符串字面量：const char* 构造 -> String（不是 Bool）
@@ -841,6 +940,18 @@ void testValueSink()
     const vt::Variant normalized = vt::detail::normalizeToVariant(std::map<int, int>{{7, 8}});
     CHECK(normalized.isMap());
     CHECK_EQ(normalized.asMap().at("7").asInt(), 8);
+
+    // 5) 无符号叶子按 onUInt 发出（不经过 onInt，也不做 int64 范围检查）
+    {
+        TraceSink sink(vt::detail::MapKeyForm::Typed);
+        vt::detail::visitValue(std::numeric_limits<std::uint64_t>::max(), sink);
+        CHECK_EQ(sink.trace(), std::string("uint:18446744073709551615;"));
+    }
+    {
+        TraceSink sink(vt::detail::MapKeyForm::Typed);
+        vt::detail::visitValue(std::uint64_t(0), sink);
+        CHECK_EQ(sink.trace(), std::string("uint:0;"));
+    }
 }
 
 } // namespace
@@ -865,6 +976,7 @@ int main()
     } while (0)
 
     RUN(testConstruction);
+    RUN(testUnsignedIntegers);
     RUN(testStringLikeInputs);
     RUN(testContainers);
     RUN(testMoves);

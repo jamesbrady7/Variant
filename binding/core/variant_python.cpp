@@ -604,8 +604,12 @@ bool fromPython(PyObject* py, vt::Variant& out)
                 // 超出 int64：正数再试 uint64（Python int 无符号位，能装下完整 64 位）。
                 PyErr_Clear();
                 const unsigned long long u = PyLong_AsUnsignedLongLong(py);
-                if (u == static_cast<unsigned long long>(-1) && PyErr_Occurred())
+                if (u == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
+                    PyErr_Clear();
+                    PyErr_SetString(PyExc_OverflowError,
+                                    "integer does not fit in 64 bits (signed or unsigned)");
                     return false;
+                }
                 out = vt::Variant(static_cast<std::uint64_t>(u));
                 return true;
             }

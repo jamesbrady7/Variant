@@ -595,7 +595,7 @@ void testBinaryExtensions()
 
 vt::Variant randomValue(std::mt19937& rng, int depth)
 {
-    int kind = static_cast<int>(rng() % 8);
+    int kind = static_cast<int>(rng() % 9);
     if (depth >= 3)
         kind = static_cast<int>(rng() % 5);
 
@@ -628,8 +628,15 @@ vt::Variant randomValue(std::mt19937& rng, int depth)
             map["k" + std::to_string(i)] = randomValue(rng, depth + 1);
         return vt::Variant(std::move(map));
     }
-    default:
+    case 7:
         return vt::Variant(static_cast<std::int64_t>(rng()));
+    default: {
+        // 无符号：固定置最高位，保证 > INT64_MAX —— JSON 往返也能保持 UInt 槽
+        const std::uint64_t big = (std::uint64_t(1) << 63) |
+                                  (static_cast<std::uint64_t>(rng()) << 16) |
+                                  (static_cast<std::uint64_t>(rng()) & 0xFFFFu);
+        return vt::Variant(big);
+    }
     }
 }
 
@@ -940,6 +947,87 @@ void testJsonIoEdgeCases()
 #endif
 }
 
+void testUnsignedSerialization()
+{
+    const auto iMin = std::numeric_limits<std::int64_t>::min();
+    const auto iMax = std::numeric_limits<std::int64_t>::max();
+    const auto uMax = std::numeric_limits<std::uint64_t>::max();
+    const std::uint64_t uHigh = std::uint64_t(1) << 63;
+
+    // 1) JSON 写出：文本只表示值，符号性不体现在文本里
+    CHECK_EQ(vt::json::write(vt::Variant(iMin)), std::string("-9223372036854775808"));
+    CHECK_EQ(vt::json::write(vt::Variant(iMax)), std::string("9223372036854775807"));
+    CHECK_EQ(vt::json::write(vt::Variant(uHigh)), std::string("9223372036854775808"));
+    CHECK_EQ(vt::json::write(vt::Variant(uMax)), std::string("18446744073709551615"));
+
+    // 2) JSON 读入：>INT64_MAX 的正数进 UInt，超 uint64 才退 double
+    CHECK(vt::json::read("0").isInt());
+    CHECK(vt::json::read("-9223372036854775808").isInt());
+    CHECK_EQ(vt::json::read("-9223372036854775808").asInt(), iMin);
+    CHECK(vt::json::read("9223372036854775808").isUInt());
+    CHECK_EQ(vt::json::read("9223372036854775808").asUInt(), uHigh);
+    CHECK(vt::json::read("18446744073709551615").isUInt());
+    CHECK_EQ(vt::json::read("18446744073709551615").asUInt(), uMax);
+    CHECK(vt::json::read("18446744073709551616").isDouble());
+    CHECK(vt::json::read("-9223372036854775809").isDouble());
+
+    // 3) 已知不对称：JSON 不带符号位，小 UInt 读回是 Int（值不变）
+    const vt::Variant smallU(std::uint64_t(5));
+    CHECK_EQ(vt::json::write(smallU), std::string("5"));
+    const vt::Variant smallBack = vt::json::read("5");
+    CHECK(smallBack.isInt());
+    CHECK_EQ(smallBack.asUInt(), std::uint64_t(5));
+
+    // 4) 二进制保留槽位：小 UInt、大 UInt、负数各归各的
+    CHECK(vt::binary::read(vt::binary::write(vt::Variant(std::uint64_t(0)))).isUInt());
+    CHECK(vt::binary::read(vt::binary::write(vt::Variant(std::uint64_t(5)))).isUInt());
+    CHECK(vt::binary::read(vt::binary::write(vt::Variant(-5))).isInt());
+    CHECK_EQ(vt::binary::read(vt::binary::write(vt::Variant(uMax))).asUInt(), uMax);
+
+    // 5) 二进制 tag 布局：magic 4 字节后是 tag（0x03=int，0x09=uint）
+    const std::string intBytes = vt::binary::write(vt::Variant(iMin));
+    CHECK(intBytes.size() > 4);
+    CHECK_EQ(static_cast<unsigned char>(intBytes[4]), static_cast<unsigned char>(0x03));
+    const std::string uintBytes = vt::binary::write(vt::Variant(uMax));
+    CHECK(uintBytes.size() > 4);
+    CHECK_EQ(static_cast<unsigned char>(uintBytes[4]), static_cast<unsigned char>(0x09));
+
+    // 6) 嵌套结构里的两种整数：JSON / 二进制都逐字段一致
+    vt::VariantMap root;
+    root["u"] = vt::Variant(uMax);
+    root["i"] = vt::Variant(iMin);
+    // 注意用 >INT64_MAX 的无符号值：小的 UInt 在 JSON 里读回会变 Int（见第 3 条），
+    // 二进制则任何大小都保留槽位。
+    root["list"] = vt::Variant(vt::VariantList{vt::Variant(uHigh), vt::Variant(-7)});
+    const vt::Variant rootValue(root);
+    CHECK_EQ(vt::json::read(vt::json::write(rootValue)), rootValue);
+    CHECK_EQ(vt::binary::read(vt::binary::write(rootValue)), rootValue);
+
+    // 7) 容器 codec：JSON 写成普通数组，读回后按目标类型还原（含 >INT64_MAX）
+    const std::vector<std::uint64_t> values{0, uHigh, uMax};
+    const vt::Variant packed = vt::Variant::fromValue(values);
+    CHECK_EQ(vt::json::write(packed), std::string("[0,9223372036854775808,18446744073709551615]"));
+    auto jsonBack = vt::getAs<std::vector<std::uint64_t>>(vt::json::read(vt::json::write(packed)));
+    CHECK(jsonBack.has_value());
+    CHECK_EQ((*jsonBack)[1], uHigh);
+    CHECK_EQ((*jsonBack)[2], uMax);
+
+    const vt::Variant binPacked = vt::binary::read(vt::binary::write(packed));
+    auto binBack = vt::getAs<std::vector<std::uint64_t>>(binPacked);
+    CHECK(binBack.has_value());
+    CHECK(*binBack == values);
+
+    // 8) 无符号键的映射：键写十进制文本，读回按 key_type 解析
+    const std::map<std::uint64_t, int> byId{{uMax, 1}, {0, 2}};
+    const vt::Variant mapVar = vt::Variant::fromValue(byId);
+    const std::string mapText = vt::json::write(mapVar);
+    CHECK(mapText.find("\"18446744073709551615\":1") != std::string::npos);
+    auto mapBack = vt::getAs<std::map<std::uint64_t, int>>(vt::json::read(mapText));
+    CHECK(mapBack.has_value());
+    CHECK_EQ(mapBack->at(uMax), 1);
+    CHECK_EQ(mapBack->at(0), 2);
+}
+
 void testRandomRoundTrip()
 {
     std::mt19937 rng(20261031);
@@ -1013,6 +1101,7 @@ int main()
     RUN(testStreamIO);
     RUN(testFileIO);
     RUN(testJsonIoEdgeCases);
+    RUN(testUnsignedSerialization);
     RUN(testRandomRoundTrip);
     RUN(testRandomBytesNoCrash);
 #undef RUN

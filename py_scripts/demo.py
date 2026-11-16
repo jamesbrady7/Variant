@@ -32,6 +32,16 @@ def check(cond, message):
     print("  ok -", message)
 
 
+def expect_overflow(fn, message):
+    try:
+        fn()
+    except OverflowError as exc:
+        print("  expected OverflowError:", exc)
+        check(True, message)
+    else:
+        raise AssertionError(message + "（没有抛 OverflowError）")
+
+
 def expect_type_error(fn, message):
     try:
         fn()
@@ -125,7 +135,14 @@ def run():
     # （JSON 侧仍写十进制字符串：JSON 规范只允许字符串成员名。）
     check(builtins["intmap"] == {1: 2, 3: 4}, "map<int,int> -> dict（键保留 int）")
     check(builtins["uint"] == 2**64 - 1, "uint64 最大值 -> Python int（不丢精度）")
-    check(vb.echo(2**64 - 1) == 2**64 - 1, "Python int(2^64-1) -> Variant -> Python int")
+
+    print("\n=== 5.2 整数边界：int64 / uint64 ===")
+    check(vb.echo(2**63) == 2**63, "2^63（刚过 int64）-> UInt -> Python int")
+    check(vb.echo(2**64 - 1) == 2**64 - 1, "2^64-1（uint64 上限）")
+    check(vb.echo(-(2**63)) == -(2**63), "int64 最小值")
+    check(vb.echo(0) == 0 and vb.echo(-1) == -1, "0 / -1 常规值")
+    expect_overflow(lambda: vb.echo(2**64), "2^64 超出 uint64 -> OverflowError")
+    expect_overflow(lambda: vb.echo(-(2**63) - 1), "低于 int64 最小值 -> OverflowError")
     check(vb.sumInts([4, 5, 6]) == 15, "Python list -> vector<int> 参数")
     check(vb.intMapSize({1: 2, 3: 4, 5: 6}) == 3, "Python dict[int,int] -> unordered_map 参数")
 
