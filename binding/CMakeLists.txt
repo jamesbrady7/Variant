@@ -91,3 +91,11 @@ if(MSVC)
         "/FI${CMAKE_SOURCE_DIR}/demo/variant_demo_api.h"
     )
 endif()
+
+# 把生成的 .pyd 复制到统一的运行目录（build/bin/<config>）：
+# demo.py、exe runner 与手工运行都从这里加载；否则会悄悄用到上一次构建的旧 pyd。
+add_custom_command(TARGET variant_binding POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:variant_binding>"
+        "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/$<TARGET_FILE_NAME:variant_binding>"
+    COMMENT "Copy variant_binding extension to build/bin/$<CONFIG>")

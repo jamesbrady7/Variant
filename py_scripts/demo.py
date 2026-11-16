@@ -143,6 +143,12 @@ def run():
     check(vb.echo(0) == 0 and vb.echo(-1) == -1, "0 / -1 常规值")
     expect_overflow(lambda: vb.echo(2**64), "2^64 超出 uint64 -> OverflowError")
     expect_overflow(lambda: vb.echo(-(2**63) - 1), "低于 int64 最小值 -> OverflowError")
+
+    # dict 的 int 键走同一套 64 位范围判断，并统一字符串化进 VariantMap
+    big_keys = vb.echo({2**63: 1, 2**64 - 1: 2, 1: 3})
+    check(big_keys == {"9223372036854775808": 1, "18446744073709551615": 2, "1": 3},
+          "大整数 dict 键 -> 十进制字符串键")
+    expect_overflow(lambda: vb.echo({2**64: 1}), "dict 键超出 uint64 -> OverflowError")
     check(vb.sumInts([4, 5, 6]) == 15, "Python list -> vector<int> 参数")
     check(vb.intMapSize({1: 2, 3: 4, 5: 6}) == 3, "Python dict[int,int] -> unordered_map 参数")
 

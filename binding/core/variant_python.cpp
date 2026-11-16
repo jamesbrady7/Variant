@@ -581,6 +581,38 @@ PyObject* toPython(const vt::Variant& value)
     Py_RETURN_NONE;
 }
 
+namespace {
+
+/**
+ * @brief Python int -> Variant：按范围选 Int / UInt，超出 64 位报 OverflowError。
+ *
+ * 值分支和 dict 键分支共用，避免两处各写一遍范围判断（键曾漏掉 uint64 回退）。
+ * @param [in] PyObject* Python int（调用方已确认 PyLong_Check）
+ * @param [out] vt::Variant 结果（仅成功时写入）
+ * @return bool 是否成功
+ */
+bool pythonIntToVariant(PyObject* py, vt::Variant& out)
+{
+    const long long v = PyLong_AsLongLong(py);
+    if (!(v == -1 && PyErr_Occurred())) {
+        out = vt::Variant(static_cast<std::int64_t>(v));
+        return true;
+    }
+    // 超出 int64：正数再试 uint64（Python int 无符号位，能装下完整 64 位）。
+    PyErr_Clear();
+    const unsigned long long u = PyLong_AsUnsignedLongLong(py);
+    if (u == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
+        PyErr_Clear();
+        PyErr_SetString(PyExc_OverflowError,
+                        "integer does not fit in 64 bits (signed or unsigned)");
+        return false;
+    }
+    out = vt::Variant(static_cast<std::uint64_t>(u));
+    return true;
+}
+
+} // namespace
+
 bool fromPython(PyObject* py, vt::Variant& out)
 {
     if (!py) {
@@ -598,24 +630,8 @@ bool fromPython(PyObject* py, vt::Variant& out)
             out = vt::Variant(py == Py_True);
             return true;
         }
-        if (PyLong_Check(py)) {
-            const long long v = PyLong_AsLongLong(py);
-            if (v == -1 && PyErr_Occurred()) {
-                // 超出 int64：正数再试 uint64（Python int 无符号位，能装下完整 64 位）。
-                PyErr_Clear();
-                const unsigned long long u = PyLong_AsUnsignedLongLong(py);
-                if (u == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
-                    PyErr_Clear();
-                    PyErr_SetString(PyExc_OverflowError,
-                                    "integer does not fit in 64 bits (signed or unsigned)");
-                    return false;
-                }
-                out = vt::Variant(static_cast<std::uint64_t>(u));
-                return true;
-            }
-            out = vt::Variant(static_cast<std::int64_t>(v));
-            return true;
-        }
+        if (PyLong_Check(py))
+            return pythonIntToVariant(py, out);
         if (PyFloat_Check(py)) {
             const double d = PyFloat_AsDouble(py);
             if (PyErr_Occurred())
@@ -665,11 +681,13 @@ bool fromPython(PyObject* py, vt::Variant& out)
                         return false;
                     keyText.assign(utf8, static_cast<std::size_t>(length));
                 } else if (PyLong_Check(key) && !PyBool_Check(key)) {
-                    // int 键统一转成十进制字符串；getAs<map<int,int>> 会再解析回来
-                    const long long numeric = PyLong_AsLongLong(key);
-                    if (numeric == -1 && PyErr_Occurred())
+                    // int 键统一转成十进制字符串；getAs<map<int,int>> 会再解析回来。
+                    // 与值分支共用同一套范围判断（键也要覆盖完整 uint64）。
+                    vt::Variant keyValue;
+                    if (!pythonIntToVariant(key, keyValue))
                         return false;
-                    keyText = std::to_string(numeric);
+                    keyText = keyValue.isUInt() ? std::to_string(keyValue.asUInt())
+                                                : std::to_string(keyValue.asInt());
                 } else {
                     PyErr_SetString(PyExc_TypeError, "VariantMap keys must be str or int");
                     return false;
